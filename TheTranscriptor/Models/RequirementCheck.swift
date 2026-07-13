@@ -65,7 +65,7 @@ struct RequirementCheck: Identifiable {
     static func huggingFaceTokenMissing() -> RequirementCheck {
         RequirementCheck(
             name: "Token Hugging Face",
-            status: .missing(instruction: "Crea un token en https://huggingface.co/settings/tokens y configúralo en Ajustes (opcional para la primera descarga de modelos)")
+            status: .missing(instruction: "1. Crea un token en https://huggingface.co/settings/tokens\n2. Acepta las condiciones de pyannote/speaker-diarization-3.1 y pyannote/segmentation-3.0 en Hugging Face\n3. Pega el token en Ajustes → Token de acceso")
         )
     }
 }

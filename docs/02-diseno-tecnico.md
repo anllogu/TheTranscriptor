@@ -83,13 +83,22 @@ fase existentes; `flush=True` obligatorio):
 ```
 @@PHASE:CONVERTING
 @@PHASE:TRANSCRIBING
-@@PROGRESS:42            # opcional, 0–100 dentro de la fase
+@@PROGRESS:42              # opcional, 0–100 dentro de la fase
 @@PHASE:DIARIZING
-@@INFO:downloading_models # solo si va a descargar de HF → la UI cambia el badge
+@@INFO:downloading_models  # solo si va a descargar de HF → la UI cambia el badge
+@@PROGRESS:17              # heurística: 0-50 ~ paso "segmentation", 50-100 ~ "embeddings"
+                           # de pyannote (vía su Hook); no es un % real de pipeline completo
+@@INFO:diarizing_step:<nombre> # pasos internos sin progreso medible (p.ej. clustering)
 @@PHASE:MERGING
 @@DONE:<ruta_result.json>
 @@ERROR:<mensaje breve>   # y exit code ≠ 0; detalle completo por stderr
 ```
+
+`@@PROGRESS` se reinicia (nueva escala 0–100) en cada `@@PHASE`; el lado
+Swift (`AppState.handle(event:)`) descarta el progreso anterior al recibir
+una nueva fase — antes se arrastraba, así que al entrar en `DIARIZING` la UI
+seguía mostrando el `100%` que había dejado `TRANSCRIBING`, pareciendo
+terminado/colgado cuando la diarización acababa de empezar.
 
 Cualquier línea sin `@@` se ignora (logs de las librerías). Esto hace el
 protocolo robusto frente al ruido de faster-whisper/pyannote.

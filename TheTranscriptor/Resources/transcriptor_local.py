@@ -22,9 +22,16 @@ Protocolo de progreso por stdout (líneas con flush=True SIEMPRE):
     @@PROGRESS:42
     @@PHASE:DIARIZING
     @@INFO:downloading_models
+    @@PROGRESS:17                  (0-50 ~ paso "segmentation", 50-100 ~ "embeddings";
+                                     heurística, no un % real de pipeline completo)
+    @@INFO:diarizing_step:<nombre> (pasos internos sin progreso medible, p.ej. clustering)
     @@PHASE:MERGING
     @@DONE:<ruta_result.json>
     @@ERROR:<mensaje breve>   (y exit code != 0; detalle completo por stderr)
+
+@@PROGRESS siempre se reinicia (nueva escala 0-100) al cambiar de @@PHASE:
+transcribing y diarizing tienen cada una su propia noción de "42%", no son
+acumulativas.
 
 El token de Hugging Face se lee EXCLUSIVAMENTE de la variable de entorno
 HF_TOKEN — nunca de argumentos CLI (visibles en `ps aux`).
@@ -184,6 +191,34 @@ def _whisper_model_cached(model_name: str) -> bool:
         return False
 
 
+# pyannote no expone un % global de progreso, solo completed/total por paso
+# interno del pipeline (segmentation, embeddings, clustering, ...) vía su
+# sistema de Hook. Los dos pasos que escalan con la duración del audio -y
+# que dominan el tiempo real en audio largo- son segmentation y embeddings;
+# los mapeamos a los tramos 0-50%/50-100% de @@PROGRESS. El resto de pasos
+# (típicamente instantáneos) solo se registran como @@INFO para dejar
+# constancia de que el proceso sigue vivo, sin mover el porcentaje.
+_DIARIZE_STEP_SPANS = {
+    "segmentation": (0, 50),
+    "embeddings": (50, 100),
+}
+
+
+class _DiarizationProgressHook:
+    """Hook duck-tipado que pyannote llama como `hook(step_name, step_artifact,
+    file=..., total=..., completed=...)` (ver `Pipeline.setup_hook` en
+    pyannote.audio.core.pipeline) — no hereda de una clase base porque
+    pyannote no expone ninguna."""
+
+    def __call__(self, step_name, step_artifact, file=None, total=None, completed=None):
+        span = _DIARIZE_STEP_SPANS.get(step_name)
+        if span and total and completed is not None:
+            lo, hi = span
+            emit_progress(lo + int(completed / total * (hi - lo)))
+        else:
+            emit_info(f"diarizing_step:{step_name}")
+
+
 def diarize(wav_path: str, hf_token: str | None) -> list[dict]:
     """Diariza con pyannote-audio. Devuelve lista de turnos {start, end, speaker}."""
     emit_phase("DIARIZING")
@@ -211,7 +246,7 @@ def diarize(wav_path: str, hf_token: str | None) -> list[dict]:
             "modelo en huggingface.co."
         )
 
-    output = pipeline(wav_path)
+    output = pipeline(wav_path, hook=_DiarizationProgressHook())
 
     # Versiones recientes de pyannote.audio (>=4) devuelven un DiarizeOutput
     # con la Annotation bajo .speaker_diarization / .exclusive_speaker_diarization

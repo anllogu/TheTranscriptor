@@ -88,11 +88,16 @@ Swift side:
   `LogStore.shared`, an in-memory ring buffer (not persisted to disk). It's
   a live debugging aid, not user-facing app logging — don't route
   `@@`-protocol-parsed state through it, only raw lines.
-- The soft-block (CU-06) only gates on **ffmpeg, Python, and packages** — the
-  HF token check is informational only (`AppState.checkRequirements` filters
-  it out of the blocking set). Don't add the token back into the gate; it's
-  only needed for the first pyannote model download, not for the app to be
-  usable.
+- The soft-block (CU-06) gates on **ffmpeg, Python, packages, and the HF
+  token** — `AppState.checkRequirements` no longer filters the token out of
+  the blocking set (reverted after real-world testing: a missing/not-yet-
+  accepted token surfaced as a raw `RuntimeError` deep in the pipeline
+  instead of a clear, actionable message). `RequirementCheck.huggingFaceTokenMissing()`
+  now tells the user to (1) create a token, (2) accept the gated model
+  conditions for both `pyannote/speaker-diarization-3.1` and
+  `pyannote/segmentation-3.0` on Hugging Face, and (3) paste it into
+  Ajustes. If you touch this again, keep `01-funcional.md`/`02-diseno-tecnico.md`
+  CU-06 in sync too.
 - If a user is stuck on `RequirementsView` with "Paquetes" missing:
   `Ajustes → Ruta Python` lets them point at any interpreter that already has
   `faster-whisper`/`pyannote.audio` (e.g. a project-local venv), or they can

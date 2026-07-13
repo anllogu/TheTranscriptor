@@ -86,14 +86,16 @@ Al primer arranque (y desde Ajustes → "Comprobar requisitos") la app verifica:
 1. `ffmpeg` accesible (PATH o rutas típicas de Homebrew).
 2. Intérprete de Python válido (ejecuta `python3 --version`).
 3. Paquetes `faster_whisper` y `pyannote.audio` importables en ese intérprete.
-4. Token de HF configurado (solo aviso, no bloqueo: es necesario únicamente
-   para la descarga inicial de modelos de pyannote).
+4. Token de HF configurado (necesario para la descarga inicial de los modelos
+   gated de pyannote; sin él, la diarización falla en pleno pipeline con un
+   error críptico en vez de un aviso claro).
 
 Cada requisito se muestra con ✓/✗ y, si falta, instrucciones concretas y
 copiables (`brew install ffmpeg`, `pip install faster-whisper pyannote.audio`,
-enlace para crear el token de HF y aceptar las condiciones de los modelos).
-La app no permite iniciar una transcripción hasta que 1–3 estén en verde,
-pero nunca falla silenciosamente.
+pasos para crear el token de HF, aceptar las condiciones de
+`pyannote/speaker-diarization-3.1` y `pyannote/segmentation-3.0`, y pegarlo
+en Ajustes). La app no permite iniciar una transcripción hasta que los
+cuatro requisitos estén en verde, pero nunca falla silenciosamente.
 
 ### CU-07 · Indicador de privacidad
 - Elemento permanente en la interfaz (pie de ventana o cabecera):

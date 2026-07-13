@@ -79,10 +79,7 @@ final class AppState {
             )
             await MainActor.run { [weak self] in
                 guard let self else { return }
-                // El token HF es opcional (solo hace falta para modelos con gating);
-                // el bloqueo suave (CU-06) es únicamente sobre ffmpeg/Python/paquetes.
-                let blocking = results.filter { $0.name != "Token Hugging Face" }
-                if blocking.allSatisfy(\.status.isOk) {
+                if results.allSatisfy(\.status.isOk) {
                     self.phase = .idle
                 } else {
                     self.phase = .checkingRequirements(results)
@@ -153,8 +150,12 @@ final class AppState {
     private func handle(event: PythonPipelineService.Event) {
         switch event {
         case .phase(let p):
-            if case .processing(_, let progress, let downloading) = phase {
-                phase = .processing(p, progress: progress, downloading: downloading)
+            // Progress is per-phase (whisper vs. pyannote each emit their own
+            // @@PROGRESS from 0); carrying over the previous phase's value
+            // made a DIARIZING start show a stale 100% left over from
+            // TRANSCRIBING, looking finished/stuck when it had barely begun.
+            if case .processing(_, _, let downloading) = phase {
+                phase = .processing(p, progress: nil, downloading: downloading)
             } else {
                 phase = .processing(p, progress: nil, downloading: false)
             }

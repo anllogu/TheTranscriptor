@@ -8,6 +8,7 @@ struct SettingsView: View {
 
     @State private var hfToken: String = ""
     @State private var detectedPath: String?
+    @State private var tokenSaveMessage: String?
 
     var body: some View {
         Form {
@@ -28,6 +29,13 @@ struct SettingsView: View {
                 Button("Eliminar token", role: .destructive) {
                     keychainService.deleteToken()
                     hfToken = ""
+                    tokenSaveMessage = "Token eliminado"
+                    LogStore.shared.append("Token HF eliminado del Keychain", source: "settings")
+                }
+                if let tokenSaveMessage {
+                    Text(tokenSaveMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -52,6 +60,10 @@ struct SettingsView: View {
         .frame(width: 420)
         .onAppear {
             hfToken = keychainService.token() ?? ""
+            LogStore.shared.append(
+                hfToken.isEmpty ? "Ajustes: no hay token HF guardado en el Keychain" : "Ajustes: token HF cargado desde el Keychain (\(hfToken.count) caracteres)",
+                source: "settings"
+            )
         }
     }
 
@@ -77,8 +89,24 @@ struct SettingsView: View {
     }
 
     private func saveToken() {
-        guard !hfToken.isEmpty else { return }
-        try? keychainService.setToken(hfToken)
+        guard !hfToken.isEmpty else {
+            LogStore.shared.append("Guardar token HF: campo vacío, no se guarda nada", source: "settings")
+            return
+        }
+        do {
+            try keychainService.setToken(hfToken)
+            let verified = keychainService.token()
+            if verified == hfToken {
+                tokenSaveMessage = "Token guardado ✓"
+                LogStore.shared.append("Token HF guardado y verificado en el Keychain (\(hfToken.count) caracteres)", source: "settings")
+            } else {
+                tokenSaveMessage = "⚠️ Guardado pero la verificación no coincide"
+                LogStore.shared.append("Token HF: setToken no lanzó error pero la relectura no coincide con lo escrito", source: "settings")
+            }
+        } catch {
+            tokenSaveMessage = "⚠️ Error al guardar: \(error)"
+            LogStore.shared.append("Token HF: fallo al guardar en Keychain: \(error)", source: "settings")
+        }
     }
 
     private func browseForPython() {
