@@ -72,7 +72,7 @@ Ajustes del Sistema → Privacidad → Micrófono.
 |---|---|---|---|
 | Modelo Whisper | selector: tiny/base/small/medium/large-v3 | `small` | UserDefaults |
 | Token Hugging Face | campo seguro | vacío | **Keychain** |
-| Borrar audio al terminar | interruptor | **activado** | UserDefaults |
+| Borrar audio al terminar | interruptor | **desactivado** | UserDefaults |
 | Intérprete de Python | ruta + botón "Autodetectar" y "Examinar…" | autodetectado | UserDefaults |
 
 - El token de HF nunca se escribe en UserDefaults, logs ni texto plano; se

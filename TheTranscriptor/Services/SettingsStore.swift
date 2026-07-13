@@ -3,7 +3,7 @@ import SwiftUI
 
 class SettingsStore: ObservableObject {
     @AppStorage("whisperModel") var whisperModel: String = WhisperModel.small.rawValue
-    @AppStorage("deleteAudioAfter") var deleteAudioAfter: Bool = true
+    @AppStorage("deleteAudioAfter") var deleteAudioAfter: Bool = false
     @AppStorage("pythonPath") var pythonPath: String = ""
 
     func getWhisperModel() -> WhisperModel {

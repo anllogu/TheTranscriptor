@@ -1,8 +1,25 @@
 import SwiftUI
 
 struct MainView: View {
+    @Environment(AppState.self) private var appState
+
     var body: some View {
-        Text("Hello The Transcriptor")
-            .padding()
+        Group {
+            switch appState.phase {
+            case .checkingRequirements(let checks):
+                RequirementsView(checks: checks)
+            case .idle:
+                DropZoneView()
+            case .recording:
+                RecordingView()
+            case .processing(let phase, let progress, let downloading):
+                ProcessingView(phase: phase, progress: progress, downloading: downloading)
+            case .result(let transcript):
+                ResultView(transcript: transcript)
+            case .error(let error):
+                ErrorView(error: error)
+            }
+        }
+        .frame(minWidth: 480, minHeight: 420)
     }
 }

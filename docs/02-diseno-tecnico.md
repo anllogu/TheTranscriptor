@@ -174,7 +174,9 @@ Resultado: `[RequirementCheck]` con `.ok / .missing(instrucción)` que
 ### 4.5 `SettingsStore`
 
 `@AppStorage`-backed: `whisperModel` (String raw), `deleteAudioAfter`
-(Bool, default `true`), `pythonPath` (String). El token **no** pasa por aquí.
+(Bool, default `false` — el original se conserva salvo que el usuario active
+el borrado explícitamente), `pythonPath` (String). El token **no** pasa por
+aquí.
 
 ## 5. Modelo de estado y navegación
 
