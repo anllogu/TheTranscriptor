@@ -29,7 +29,7 @@ struct RequirementsView: View {
                                     .font(.callout.monospaced())
                                     .textSelection(.enabled)
                                     .padding(6)
-                                    .background(Color.secondary.opacity(0.1))
+                                    .background(Color.secondary.opacity(0.2))
                                     .cornerRadius(6)
                             }
                         }

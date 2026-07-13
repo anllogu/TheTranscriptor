@@ -186,12 +186,7 @@ final class AppState {
     // MARK: - Helpers
 
     private func bundledScriptURL() -> URL? {
-        let dest = PythonPipelineService.applicationSupportDirectory()
-            .appendingPathComponent("transcriptor_local.py")
-        if FileManager.default.fileExists(atPath: dest.path) {
-            return dest
-        }
-        return Bundle.main.url(forResource: "transcriptor_local", withExtension: "py")
+        Bundle.main.url(forResource: "transcriptor_local", withExtension: "py")
     }
 
     private func resolvedPythonPath() -> String {

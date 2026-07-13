@@ -258,12 +258,14 @@ final class PythonPipelineService {
         let stderrTask = Task.detached {
             for await line in lineStream(stderrPipe.fileHandleForReading) {
                 await stderrBuffer.append(line)
+                await MainActor.run { LogStore.shared.append(line, source: "stderr") }
             }
         }
 
         // Read stdout continuously and parse the `@@` protocol.
         let stdoutTask = Task.detached {
             for await line in lineStream(stdoutPipe.fileHandleForReading) {
+                await MainActor.run { LogStore.shared.append(line, source: "stdout") }
                 guard line.hasPrefix("@@") else { continue }
                 let payload = line.dropFirst(2)
 
@@ -330,7 +332,16 @@ final class PythonPipelineService {
         return destination
     }
 
+    /// Overridable only from tests, so the suite never writes into the real
+    /// user's `~/Library/Application Support/TheTranscriptor/` — doing so
+    /// once overwrote the production `transcriptor_local.py` with the test
+    /// fixture, permanently poisoning every future transcription.
+    static var applicationSupportDirectoryOverride: URL?
+
     static func applicationSupportDirectory() -> URL {
+        if let override = applicationSupportDirectoryOverride {
+            return override
+        }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return base.appendingPathComponent("TheTranscriptor", isDirectory: true)
     }

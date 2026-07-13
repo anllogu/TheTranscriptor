@@ -16,9 +16,17 @@ final class PythonPipelineServiceTests: XCTestCase {
 
         inputFile = tempDir.appendingPathComponent("input.wav")
         try Data("fake audio bytes".utf8).write(to: inputFile)
+
+        // Never let the fixture script get installed into the real user's
+        // ~/Library/Application Support/TheTranscriptor/ — doing so once
+        // overwrote the production transcriptor_local.py with this test
+        // fixture, permanently poisoning every future transcription.
+        PythonPipelineService.applicationSupportDirectoryOverride =
+            tempDir.appendingPathComponent("AppSupport", isDirectory: true)
     }
 
     override func tearDownWithError() throws {
+        PythonPipelineService.applicationSupportDirectoryOverride = nil
         if let tempDir {
             try? FileManager.default.removeItem(at: tempDir)
         }

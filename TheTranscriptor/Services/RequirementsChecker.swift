@@ -3,6 +3,11 @@ import Foundation
 class RequirementsChecker {
     private let detector = PythonEnvironmentDetector()
     private let timeout: TimeInterval = 10.0
+    // `import faster_whisper, pyannote.audio` pulls in torch/torchaudio; en
+    // frío (sin __pycache__, p.ej. justo tras una instalación nueva) puede
+    // tardar >10s. Un timeout corto aquí produce falsos negativos que llevan
+    // al usuario a reinstalar un entorno que en realidad ya funciona.
+    private let packagesTimeout: TimeInterval = 45.0
 
     func checkRequirements(
         pythonPath: String? = nil,
@@ -88,7 +93,7 @@ class RequirementsChecker {
         do {
             try process.run()
 
-            let deadline = Date().addingTimeInterval(timeout)
+            let deadline = Date().addingTimeInterval(packagesTimeout)
             while process.isRunning && Date() < deadline {
                 usleep(100_000)
             }

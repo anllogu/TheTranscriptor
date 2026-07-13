@@ -6,11 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **The Transcriptor** — native macOS 14+ app (Swift 5.9+, pure SwiftUI, no third-party UI deps) that wraps an existing Python pipeline (faster-whisper + pyannote-audio) for fully local audio transcription with speaker diarization. Personal use, outside the Mac App Store, App Sandbox disabled. UI language and all docs are **Spanish** — keep them that way.
 
-**Current state: Fases 0-4 implementadas** (cimientos, contrato del script,
-núcleo Swift, e interfaz completa incluyendo grabación de micrófono —
-adelantada respecto al faseado original, ver `docs/plans/02-plan-fase-4.md`).
-Pendiente: pulido de Fase 6 (atajos de teclado, estados vacíos, revisión de
-modo oscuro). El source of truth de diseño sigue viviendo en `docs/`:
+**Current state: Fases 0-6 implementadas** (cimientos, contrato del script,
+núcleo Swift, interfaz completa con grabación de micrófono, y el pulido de
+Fase 6: atajos ⌘N/⌘,/⌘C, estado vacío en `ResultView`, `defaultSize` de
+ventana y revisión de modo oscuro — ver `docs/plans/03-plan-fase-5-6.md`).
+Pendiente: ejecutar manualmente en el Mac del usuario la checklist de
+regresión E2E en `docs/plans/checklist-regresion-e2e.md` (fixtures reales,
+permisos del sistema, apps externas — nada de esto es accionable por un
+agente). El source of truth de diseño sigue viviendo en `docs/`:
 
 - `docs/01-funcional.md` — functional spec (use cases referenced as CU-xx)
 - `docs/02-diseno-tecnico.md` — technical design (sections referenced as §N)
@@ -63,8 +66,28 @@ Swift side:
 
 ## Gotchas
 
+- `WindowGroup` auto-adds a "Nueva ventana" File-menu command bound to ⌘N;
+  this app assigns ⌘N to "nueva transcripción" buttons in the views instead,
+  so `TheTranscriptorApp.swift` suppresses the default with
+  `.commands { CommandGroup(replacing: .newItem) { } }`. If you add more
+  `WindowGroup`/`Window` scenes, check for the same collision.
 - GUI apps don't inherit the shell PATH: extend the child process env with `/opt/homebrew/bin:/usr/local/bin`, and detect python/ffmpeg via `/bin/zsh -lc` (§4.4).
-- Requirement checks (ffmpeg, python, packages) each run with a 10 s timeout; the app soft-blocks transcription until they pass but must never fail silently.
+- Requirement checks (ffmpeg, python) run with a 10 s timeout; the **packages**
+  check (`import faster_whisper, pyannote.audio`) uses a separate, longer
+  45 s timeout (`RequirementsChecker.packagesTimeout`) because that import
+  pulls in torch/torchaudio and can take >10s cold (no `__pycache__` yet,
+  e.g. right after a fresh `PythonSetupService` install) — a short timeout
+  here produces a false "Paquetes" failure that sends the user back into
+  "Configurar automáticamente", which used to blow away a working venv and
+  reinstall from scratch every launch. `PythonSetupService.run()` also
+  guards against this now: it checks whether the existing venv's packages
+  already import successfully before deleting and recreating it.
+- `TheTranscriptor/Views/LogWindowView.swift` (⌘L / menu "Mostrar/Ocultar
+  registro de depuración") streams raw stdout/stderr lines from
+  `PythonPipelineService` and setup lines from `PythonSetupService` into
+  `LogStore.shared`, an in-memory ring buffer (not persisted to disk). It's
+  a live debugging aid, not user-facing app logging — don't route
+  `@@`-protocol-parsed state through it, only raw lines.
 - The soft-block (CU-06) only gates on **ffmpeg, Python, and packages** — the
   HF token check is informational only (`AppState.checkRequirements` filters
   it out of the blocking set). Don't add the token back into the gate; it's

@@ -20,18 +20,33 @@ struct ResultView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            List {
-                ForEach(transcript.segments) { segment in
-                    SegmentRow(
-                        segment: segment,
-                        speakerIndex: speakerOrder.firstIndex(of: segment.speaker) ?? 0,
-                        displayName: transcript.displayName(for: segment.speaker)
-                    ) { newName in
-                        transcript.setSpeakerName(newName, for: segment.speaker)
+            if transcript.segments.isEmpty {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "waveform.slash")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.secondary)
+                    Text("No se detectó ningún segmento de voz en este audio")
+                        .font(.title3.bold())
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List {
+                    ForEach(transcript.segments) { segment in
+                        SegmentRow(
+                            segment: segment,
+                            speakerIndex: speakerOrder.firstIndex(of: segment.speaker) ?? 0,
+                            displayName: transcript.displayName(for: segment.speaker)
+                        ) { newName in
+                            transcript.setSpeakerName(newName, for: segment.speaker)
+                        }
                     }
                 }
+                .listStyle(.inset)
             }
-            .listStyle(.inset)
 
             Divider()
 
@@ -39,6 +54,7 @@ struct ResultView: View {
                 Button("Copiar") {
                     copyToClipboard()
                 }
+                .keyboardShortcut("c", modifiers: .command)
                 Button("Exportar .txt") {
                     export(using: TxtExporter.export, extension: "txt")
                 }
@@ -49,6 +65,7 @@ struct ResultView: View {
                 Button("Nueva transcripción") {
                     appState.reset()
                 }
+                .keyboardShortcut("n", modifiers: .command)
             }
             .padding()
         }

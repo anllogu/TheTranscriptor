@@ -37,6 +37,7 @@ struct ErrorView: View {
                 appState.retry()
             }
             .buttonStyle(.borderedProminent)
+            .keyboardShortcut("n", modifiers: .command)
 
             Spacer()
         }

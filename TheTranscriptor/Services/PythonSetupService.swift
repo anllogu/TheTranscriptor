@@ -33,12 +33,24 @@ final class PythonSetupService {
     }
 
     private func run(continuation: AsyncStream<Event>.Continuation) async throws -> String {
+        let venvDir = Self.venvDirectory()
+        let existingVenvPython = venvDir.appendingPathComponent("bin/python3").path
+
+        // Si ya hay un venv con los paquetes instalados y funcionando (p.ej.
+        // el usuario reintentó tras un falso negativo del chequeo de
+        // requisitos), no lo destruyamos para reinstalar desde cero: eso
+        // desperdicia una instalación de varios minutos cada vez.
+        if FileManager.default.fileExists(atPath: existingVenvPython),
+           await packagesAlreadyInstalled(pythonPath: existingVenvPython, continuation: continuation) {
+            continuation.yield(.log("El entorno ya existe y los paquetes están instalados."))
+            return existingVenvPython
+        }
+
         guard let bootstrapPython = PythonEnvironmentDetector().detectPythonPath() else {
             throw SetupError(message: "No se encontró ningún intérprete Python 3 en este Mac. Instala Python 3.8+ antes de continuar.")
         }
         continuation.yield(.log("Usando \(bootstrapPython) para crear el entorno…"))
 
-        let venvDir = Self.venvDirectory()
         try? FileManager.default.removeItem(at: venvDir)
 
         continuation.yield(.log("Creando entorno virtual en \(venvDir.path)…"))
@@ -93,6 +105,7 @@ final class PythonSetupService {
                 let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !trimmed.isEmpty else { return }
                 continuation.yield(.log(trimmed))
+                Task { @MainActor in LogStore.shared.append(trimmed, source: "setup") }
             }
 
             process.terminationHandler = { finishedProcess in
@@ -110,6 +123,47 @@ final class PythonSetupService {
                 try process.run()
             } catch {
                 cont.resume(throwing: error)
+            }
+        }
+    }
+
+    /// Import en frío puede tardar bastante (torch/pyannote), de ahí el
+    /// timeout generoso — ver el mismo razonamiento en `RequirementsChecker`.
+    private func packagesAlreadyInstalled(
+        pythonPath: String,
+        continuation: AsyncStream<Event>.Continuation
+    ) async -> Bool {
+        continuation.yield(.log("Comprobando si el entorno existente ya tiene los paquetes…"))
+        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: pythonPath)
+            process.arguments = ["-c", "import faster_whisper, pyannote.audio"]
+            process.standardOutput = Pipe()
+            process.standardError = Pipe()
+
+            var resumed = false
+            let resumeOnce: (Bool) -> Void = { result in
+                guard !resumed else { return }
+                resumed = true
+                cont.resume(returning: result)
+            }
+
+            process.terminationHandler = { finished in
+                resumeOnce(finished.terminationStatus == 0)
+            }
+
+            do {
+                try process.run()
+            } catch {
+                resumeOnce(false)
+                return
+            }
+
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 45) {
+                if process.isRunning {
+                    process.terminate()
+                    resumeOnce(false)
+                }
             }
         }
     }
