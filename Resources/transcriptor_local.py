@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""transcriptor_local.py — pipeline local de transcripción + diarización.
+
+Contrato: docs/02-diseno-tecnico.md §3. Implementa:
+
+    ffmpeg (normalización) -> faster-whisper (transcripción)
+        -> pyannote-audio (diarización) -> merge por hablante
+
+Invocación:
+
+    python3 transcriptor_local.py \
+        --input <ruta_audio> \
+        --output-dir <dir_resultados> \
+        --model <tiny|base|small|medium|large-v3> \
+        --json \
+        [--keep-audio]
+
+Protocolo de progreso por stdout (líneas con flush=True SIEMPRE):
+
+    @@PHASE:CONVERTING
+    @@PHASE:TRANSCRIBING
+    @@PROGRESS:42
+    @@PHASE:DIARIZING
+    @@INFO:downloading_models
+    @@PHASE:MERGING
+    @@DONE:<ruta_result.json>
+    @@ERROR:<mensaje breve>   (y exit code != 0; detalle completo por stderr)
+
+El token de Hugging Face se lee EXCLUSIVAMENTE de la variable de entorno
+HF_TOKEN — nunca de argumentos CLI (visibles en `ps aux`).
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import traceback
+import uuid
+
+MODEL_CHOICES = ["tiny", "base", "small", "medium", "large-v3"]
+
+
+def emit(line: str) -> None:
+    """Imprime una línea del protocolo @@ con flush inmediato."""
+    print(line, flush=True)
+
+
+def emit_phase(phase: str) -> None:
+    emit(f"@@PHASE:{phase}")
+
+
+def emit_progress(pct: int) -> None:
+    pct = max(0, min(100, int(pct)))
+    emit(f"@@PROGRESS:{pct}")
+
+
+def emit_info(info: str) -> None:
+    emit(f"@@INFO:{info}")
+
+
+def emit_done(result_path: str) -> None:
+    emit(f"@@DONE:{result_path}")
+
+
+def emit_error(message: str) -> None:
+    # Mensaje breve por stdout (protocolo); el detalle completo va a stderr
+    # por separado (ver main()).
+    short = message.strip().splitlines()[0] if message.strip() else "error desconocido"
+    emit(f"@@ERROR:{short}")
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="transcriptor_local.py",
+        description="Transcripción + diarización local (faster-whisper + pyannote-audio).",
+    )
+    parser.add_argument("--input", required=True, help="Ruta al archivo de audio de entrada")
+    parser.add_argument("--output-dir", required=True, help="Directorio de resultados")
+    parser.add_argument(
+        "--model",
+        required=True,
+        choices=MODEL_CHOICES,
+        help="Modelo whisper a usar",
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        dest="emit_json",
+        help="Además del .txt, emite result.json",
+    )
+    parser.add_argument(
+        "--keep-audio",
+        action="store_true",
+        help="No borrar el archivo de audio original al terminar",
+    )
+    return parser.parse_args(argv)
+
+
+def convert_to_wav(input_path: str, work_dir: str) -> str:
+    """Normaliza el audio de entrada a WAV 16kHz mono PCM16 con ffmpeg."""
+    emit_phase("CONVERTING")
+    out_path = os.path.join(work_dir, f"normalized_{uuid.uuid4().hex}.wav")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-i",
+        input_path,
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        out_path,
+    ]
+    proc = subprocess.run(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"ffmpeg falló (exit {proc.returncode}) al convertir el audio:\n{proc.stderr}"
+        )
+    if not os.path.exists(out_path):
+        raise RuntimeError("ffmpeg no produjo el archivo WAV esperado")
+    return out_path
+
+
+def transcribe(wav_path: str, model_name: str) -> tuple[str, float, list[dict]]:
+    """Transcribe con faster-whisper. Devuelve (idioma, duración, segmentos)."""
+    emit_phase("TRANSCRIBING")
+
+    # faster-whisper descarga el modelo la primera vez que se instancia;
+    # no hay un hook de progreso de descarga expuesto por la librería, así
+    # que emitimos @@INFO:downloading_models antes de instanciar cuando el
+    # modelo todavía no está cacheado localmente.
+    if not _whisper_model_cached(model_name):
+        emit_info("downloading_models")
+
+    from faster_whisper import WhisperModel
+
+    whisper_model = WhisperModel(model_name, device="auto", compute_type="auto")
+
+    segments_iter, info = whisper_model.transcribe(wav_path, beam_size=5)
+
+    duration = float(info.duration) if info.duration else 0.0
+    language = info.language or "es"
+
+    segments: list[dict] = []
+    for seg in segments_iter:
+        segments.append(
+            {
+                "start": float(seg.start),
+                "end": float(seg.end),
+                "text": seg.text.strip(),
+            }
+        )
+        if duration > 0:
+            pct = int(min(seg.end, duration) / duration * 100)
+            emit_progress(pct)
+
+    return language, duration, segments
+
+
+def _whisper_model_cached(model_name: str) -> bool:
+    """Heurística: ¿ya existe el modelo en la caché local de HF/faster-whisper?"""
+    try:
+        from huggingface_hub import scan_cache_dir
+
+        cache_info = scan_cache_dir()
+        needle = f"whisper-{model_name}" if not model_name.startswith("whisper") else model_name
+        for repo in cache_info.repos:
+            if needle in repo.repo_id or model_name in repo.repo_id:
+                return True
+        return False
+    except Exception:
+        # Si no se puede determinar, asumimos que no está cacheado y avisamos
+        # de todas formas (mejor un falso "descargando" que silencio).
+        return False
+
+
+def diarize(wav_path: str, hf_token: str | None) -> list[dict]:
+    """Diariza con pyannote-audio. Devuelve lista de turnos {start, end, speaker}."""
+    emit_phase("DIARIZING")
+
+    if not hf_token:
+        raise RuntimeError(
+            "Falta HF_TOKEN: la diarización requiere un token de Hugging Face "
+            "con acceso al modelo gated pyannote/speaker-diarization-3.1. "
+            "Define la variable de entorno HF_TOKEN."
+        )
+
+    if not _pyannote_model_cached():
+        emit_info("downloading_models")
+
+    from pyannote.audio import Pipeline
+
+    pipeline = Pipeline.from_pretrained(
+        "pyannote/speaker-diarization-3.1",
+        token=hf_token,
+    )
+    if pipeline is None:
+        raise RuntimeError(
+            "No se pudo cargar pyannote/speaker-diarization-3.1: revisa que "
+            "el token HF_TOKEN tenga acceso aceptado a las condiciones del "
+            "modelo en huggingface.co."
+        )
+
+    output = pipeline(wav_path)
+
+    # Versiones recientes de pyannote.audio (>=4) devuelven un DiarizeOutput
+    # con la Annotation bajo .speaker_diarization / .exclusive_speaker_diarization
+    # (esta última sin solapes, mejor para casar con segmentos de whisper).
+    # Versiones antiguas devolvían directamente una Annotation con .itertracks().
+    if hasattr(output, "itertracks"):
+        annotation = output
+    else:
+        annotation = getattr(output, "exclusive_speaker_diarization", None) or getattr(
+            output, "speaker_diarization"
+        )
+
+    turns: list[dict] = []
+    for turn, _, speaker in annotation.itertracks(yield_label=True):
+        turns.append({"start": float(turn.start), "end": float(turn.end), "speaker": speaker})
+    return turns
+
+
+def _pyannote_model_cached() -> bool:
+    try:
+        from huggingface_hub import scan_cache_dir
+
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if "speaker-diarization" in repo.repo_id or "pyannote" in repo.repo_id:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def merge_segments(
+    whisper_segments: list[dict], diarization_turns: list[dict]
+) -> list[dict]:
+    """Asigna hablante a cada segmento de whisper por solapamiento temporal.
+
+    Si no hay turnos de diarización (p.ej. no se ejecutó diarización),
+    todos los segmentos se etiquetan como SPEAKER_00.
+    """
+    emit_phase("MERGING")
+
+    merged: list[dict] = []
+    for seg in whisper_segments:
+        speaker = _speaker_for_segment(seg, diarization_turns)
+        merged.append(
+            {
+                "start": seg["start"],
+                "end": seg["end"],
+                "speaker": speaker,
+                "text": seg["text"],
+            }
+        )
+    return merged
+
+
+def _speaker_for_segment(seg: dict, turns: list[dict]) -> str:
+    if not turns:
+        return "SPEAKER_00"
+
+    best_speaker = None
+    best_overlap = -1.0
+    for turn in turns:
+        overlap = min(seg["end"], turn["end"]) - max(seg["start"], turn["start"])
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_speaker = turn["speaker"]
+
+    if best_speaker is None or best_overlap <= 0:
+        # Sin solapamiento con ningún turno: usar el turno más cercano.
+        mid = (seg["start"] + seg["end"]) / 2
+        best_speaker = min(
+            turns, key=lambda t: min(abs(mid - t["start"]), abs(mid - t["end"]))
+        )["speaker"]
+
+    return best_speaker
+
+
+def write_txt(segments: list[dict], txt_path: str) -> None:
+    lines = []
+    for seg in segments:
+        lines.append(f"[{seg['speaker']}] {seg['text']}")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + ("\n" if lines else ""))
+
+
+def write_result_json(
+    language: str, duration: float, segments: list[dict], json_path: str
+) -> None:
+    result = {"language": language, "duration": duration, "segments": segments}
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+
+def main(argv: list[str]) -> int:
+    args = parse_args(argv)
+
+    hf_token = os.environ.get("HF_TOKEN")  # SOLO desde entorno, nunca CLI
+
+    input_path = os.path.abspath(args.input)
+    output_dir = os.path.abspath(args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
+
+    if not os.path.isfile(input_path):
+        emit_error(f"El archivo de entrada no existe: {input_path}")
+        print(f"Archivo de entrada no encontrado: {input_path}", file=sys.stderr)
+        return 1
+
+    wav_path = None
+    try:
+        wav_path = convert_to_wav(input_path, output_dir)
+
+        language, duration, whisper_segments = transcribe(wav_path, args.model)
+
+        diarization_turns = diarize(wav_path, hf_token)
+
+        merged = merge_segments(whisper_segments, diarization_turns)
+
+        txt_path = os.path.join(output_dir, "result.txt")
+        write_txt(merged, txt_path)
+
+        result_path = txt_path
+        if args.emit_json:
+            json_path = os.path.join(output_dir, "result.json")
+            write_result_json(language, duration, merged, json_path)
+            result_path = json_path
+
+        emit_done(result_path)
+        return 0
+
+    except Exception as exc:  # noqa: BLE001 - queremos capturar todo y reportar
+        emit_error(str(exc))
+        traceback.print_exc(file=sys.stderr)
+        return 1
+
+    finally:
+        # Limpieza: WAV normalizado temporal siempre se borra.
+        if wav_path and os.path.exists(wav_path):
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
+
+        # El audio original solo se borra si NO se pidió --keep-audio,
+        # y solo si el pipeline llegó a producir algo utilizable de él
+        # (se borra siempre que no haya --keep-audio, según contrato §3.1:
+        # "NO borrar el original" es el comportamiento con el flag activo).
+        if not args.keep_audio and os.path.exists(input_path):
+            try:
+                os.remove(input_path)
+            except OSError as exc:
+                print(f"Aviso: no se pudo borrar el audio original: {exc}", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

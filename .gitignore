@@ -1,0 +1,33 @@
+# Xcode / Swift
+.build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+.swiftpm/
+*.moved-aside
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+
+# XcodeGen-generated project (regenerated from project.yml)
+*.xcodeproj/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.venv-script/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# App runtime artifacts (never trackeados)
+Tests/Fixtures/*.wav
+Tests/Fixtures/*.m4a
+Tests/Fixtures/*.mp4
+Tests/Fixtures/*.mov
