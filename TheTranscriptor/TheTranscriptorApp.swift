@@ -10,6 +10,7 @@ struct TheTranscriptorApp: App {
                 .environment(appState)
                 .task {
                     PythonPipelineService.purgeOrphanedWorkDirs()
+                    HistoryStore.shared.applyRetentionPolicy(retentionDays: appState.settings.historyRetentionDays)
                     appState.checkRequirements()
                 }
         }
@@ -21,12 +22,18 @@ struct TheTranscriptorApp: App {
             // el comando por defecto evita que compita por el atajo.
             CommandGroup(replacing: .newItem) { }
             LogWindowCommands()
+            HistoryWindowCommands()
         }
 
         Window("Registro de depuración", id: "debug-log") {
             LogWindowView()
         }
         .defaultSize(width: 640, height: 420)
+
+        Window("Historial", id: "history") {
+            HistoryWindowView()
+        }
+        .defaultSize(width: 720, height: 480)
 
         Settings {
             SettingsView()
@@ -50,6 +57,25 @@ private struct LogWindowCommands: Commands {
                 }
             }
             .keyboardShortcut("l", modifiers: .command)
+        }
+    }
+}
+
+private struct HistoryWindowCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var historyStore = HistoryStore.shared
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Button(historyStore.isWindowOpen ? "Ocultar historial" : "Mostrar historial") {
+                if historyStore.isWindowOpen {
+                    dismissWindow(id: "history")
+                } else {
+                    openWindow(id: "history")
+                }
+            }
+            .keyboardShortcut("y", modifiers: .command)
         }
     }
 }

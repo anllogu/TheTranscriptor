@@ -5,7 +5,7 @@ enum AppPhase {
     case idle
     case recording
     case processing(PipelinePhase, progress: Int?, downloading: Bool)
-    case result(Transcript)
+    case result(HistoryEntry)
     case error(PipelineError)
 }
 
@@ -21,19 +21,24 @@ final class AppState {
     private let pipelineService: PythonPipelineService
     private let keychainService: KeychainService
     private let requirementsChecker: RequirementsChecker
+    private let historyStore: HistoryStore
     private var pipelineTask: Task<Void, Never>?
+    private var currentInput: URL?
+    private var currentModel: WhisperModel?
 
     init(
         settings: SettingsStore = SettingsStore(),
         pipelineService: PythonPipelineService = PythonPipelineService(),
         keychainService: KeychainService = KeychainService(),
         requirementsChecker: RequirementsChecker = RequirementsChecker(),
+        historyStore: HistoryStore = .shared,
         recorder: AudioRecorderService = AudioRecorderService()
     ) {
         self.settings = settings
         self.pipelineService = pipelineService
         self.keychainService = keychainService
         self.requirementsChecker = requirementsChecker
+        self.historyStore = historyStore
         self.recorder = recorder
     }
 
@@ -115,14 +120,17 @@ final class AppState {
             return
         }
 
+        let model = settings.getWhisperModel()
         let pipelineSettings = PipelineSettings(
             pythonPath: resolvedPythonPath(),
             scriptPath: scriptPath,
-            model: settings.getWhisperModel(),
+            model: model,
             keepAudio: !settings.deleteAudioAfter,
             hfToken: keychainService.token()
         )
 
+        currentInput = input
+        currentModel = model
         phase = .processing(.converting, progress: nil, downloading: false)
 
         pipelineTask?.cancel()
@@ -178,7 +186,16 @@ final class AppState {
         do {
             let data = try Data(contentsOf: url)
             let transcript = try JSONDecoder().decode(Transcript.self, from: data)
-            phase = .result(transcript)
+            let entry = HistoryEntry(
+                sourceFileName: currentInput?.lastPathComponent ?? "audio",
+                sourceAudioPath: currentInput?.path,
+                whisperModel: (currentModel ?? settings.getWhisperModel()).rawValue,
+                transcript: transcript
+            )
+            // Guardado best-effort: si falla (disco lleno, permisos, etc.)
+            // no debe impedir que el usuario vea/exporte el resultado.
+            historyStore.save(entry)
+            phase = .result(entry)
         } catch {
             phase = .error(PipelineError(message: "No se pudo leer el resultado: \(error.localizedDescription)", stderrTail: []))
         }

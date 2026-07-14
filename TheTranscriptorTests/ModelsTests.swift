@@ -52,6 +52,16 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(transcript.displayName(for: "SPEAKER_00"), "Angel")
     }
 
+    func testTranscriptSpeakerNamesRoundTripsThroughCodable() throws {
+        var transcript = Transcript(language: "es", duration: 100.0, segments: [])
+        transcript.setSpeakerName("Angel", for: "SPEAKER_00")
+
+        let data = try JSONEncoder().encode(transcript)
+        let decoded = try JSONDecoder().decode(Transcript.self, from: data)
+
+        XCTAssertEqual(decoded.displayName(for: "SPEAKER_00"), "Angel")
+    }
+
     func testPipelinePhaseDisplayName() {
         XCTAssertEqual(PipelinePhase.converting.displayName, "Convirtiendo audio…")
         XCTAssertEqual(PipelinePhase.transcribing.displayName, "Transcribiendo…")

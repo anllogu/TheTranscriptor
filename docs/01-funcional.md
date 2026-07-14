@@ -105,6 +105,24 @@ cuatro requisitos estén en verde, pero nunca falla silenciosamente.
 - Tooltip/popover que explica la política: el audio nunca se sube, el borrado
   automático del original, y que los renombres de hablantes son locales.
 
+### CU-08 · Historial de transcripciones
+- Cada transcripción completada se registra automáticamente en un
+  historial persistente (no requiere acción del usuario) — transcripción
+  completa (segmentos, idioma, duración, renombres de hablante) más
+  metadatos: fichero de origen, fecha, modelo Whisper usado. **No se copia
+  el audio original**: si el fichero de origen ya no existe (se borró o se
+  movió), la entrada sigue disponible para consulta/exportación, solo sin
+  acceso al audio.
+- Se accede desde una ventana aparte ("Historial", menú o atajo de
+  teclado), con lista de entradas a la izquierda y detalle a la derecha —
+  mismo patrón que "Registro de depuración".
+- Acciones disponibles por entrada: ver segmentos agrupados por hablante,
+  renombrar hablantes (persiste inmediatamente), copiar, exportar a
+  `.txt`/`.srt`, eliminar del historial, y "Mostrar en Finder" si el audio
+  original todavía existe en su ruta.
+- Retención configurable en Ajustes (ilimitado por defecto o purga
+  automática pasados 7/30/90/365 días).
+
 ## 4. Requisitos no funcionales
 
 - **Privacidad:** cero peticiones de red desde la propia app; la única red la
@@ -124,5 +142,4 @@ cuatro requisitos estén en verde, pero nunca falla silenciosamente.
 
 - Distribución en Mac App Store, notarización, sandbox.
 - Edición del texto de los segmentos (solo renombrar hablantes).
-- Historial/biblioteca de transcripciones (posible v2).
 - Reimplementación del ML en Swift (WhisperKit, etc.).

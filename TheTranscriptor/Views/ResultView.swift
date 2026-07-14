@@ -4,11 +4,13 @@ import AppKit
 struct ResultView: View {
     @Environment(AppState.self) private var appState
 
-    @State private var transcript: Transcript
+    @State private var entry: HistoryEntry
 
-    init(transcript: Transcript) {
-        _transcript = State(initialValue: transcript)
+    init(entry: HistoryEntry) {
+        _entry = State(initialValue: entry)
     }
+
+    private var transcript: Transcript { entry.transcript }
 
     private var speakerOrder: [String] {
         var seen: [String] = []
@@ -41,7 +43,8 @@ struct ResultView: View {
                             speakerIndex: speakerOrder.firstIndex(of: segment.speaker) ?? 0,
                             displayName: transcript.displayName(for: segment.speaker)
                         ) { newName in
-                            transcript.setSpeakerName(newName, for: segment.speaker)
+                            entry.transcript.setSpeakerName(newName, for: segment.speaker)
+                            HistoryStore.shared.save(entry)
                         }
                     }
                 }

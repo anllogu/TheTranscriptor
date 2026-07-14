@@ -14,8 +14,8 @@ struct MainView: View {
                 RecordingView()
             case .processing(let phase, let progress, let downloading):
                 ProcessingView(phase: phase, progress: progress, downloading: downloading)
-            case .result(let transcript):
-                ResultView(transcript: transcript)
+            case .result(let entry):
+                ResultView(entry: entry)
             case .error(let error):
                 ErrorView(error: error)
             }

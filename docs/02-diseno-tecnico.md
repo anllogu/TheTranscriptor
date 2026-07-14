@@ -184,8 +184,47 @@ Resultado: `[RequirementCheck]` con `.ok / .missing(instrucción)` que
 
 `@AppStorage`-backed: `whisperModel` (String raw), `deleteAudioAfter`
 (Bool, default `false` — el original se conserva salvo que el usuario active
-el borrado explícitamente), `pythonPath` (String). El token **no** pasa por
-aquí.
+el borrado explícitamente), `pythonPath` (String), `historyRetentionDays`
+(Int, default `0` = sin límite; ver §4.6). El token **no** pasa por aquí.
+
+### 4.6 `HistoryStore` e Historial de transcripciones
+
+Al terminar cada transcripción (`AppState.decodeAndShowResult`), además de
+mostrar el resultado se persiste automáticamente un `HistoryEntry`:
+
+```swift
+struct HistoryEntry: Codable, Identifiable {
+    let id: UUID
+    let createdAt: Date
+    let sourceFileName: String
+    let sourceAudioPath: String?   // puede no existir ya; no se copia el audio
+    let whisperModel: String
+    var transcript: Transcript
+}
+```
+
+`HistoryStore` (`@Observable`, singleton `HistoryStore.shared`, mismo
+patrón que `LogStore.shared`) guarda **un fichero JSON por entrada** en
+`Application Support/TheTranscriptor/history/<uuid>.json`. Deliberadamente
+en una carpeta separada de `work/`, que
+`PythonPipelineService.purgeOrphanedWorkDirs()` vacía entera en cada
+arranque — el historial debe sobrevivir a reinicios de la app.
+`applyRetentionPolicy(retentionDays:)` purga entradas más antiguas que el
+ajuste de retención; se invoca tras cada guardado y una vez al arrancar,
+junto a `purgeOrphanedWorkDirs()`.
+
+`Transcript` pasa de una síntesis automática de `Codable` (que excluía
+`speakerNames` de sus `CodingKeys`, ya que `result.json` del script nunca
+trae ese campo) a una implementación manual de `init(from:)` que decodifica
+`speakerNames` con `decodeIfPresent(...) ?? [:]` — compatible con
+`result.json` (sin la clave) y necesaria para que el historial conserve los
+renombres de hablante hechos por el usuario.
+
+La UI vive en una ventana aparte ("Historial", `Window(id: "history")`),
+mismo patrón que "Registro de depuración": `NavigationSplitView` con lista
+de entradas y detalle (misma estructura de lista de segmentos que
+`ResultView`, con "Eliminar del historial" en vez de "Nueva
+transcripción").
 
 ## 5. Modelo de estado y navegación
 
@@ -195,7 +234,7 @@ enum AppPhase {
     case idle                    // DropZone + botón grabar
     case recording
     case processing(PipelinePhase, progress: Int?, downloading: Bool)
-    case result(Transcript)
+    case result(HistoryEntry)
     case error(PipelineError)
 }
 

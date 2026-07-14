@@ -39,6 +39,14 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Historial") {
+                Picker("Mantener transcripciones", selection: historyRetentionBinding) {
+                    ForEach(Self.retentionOptions, id: \.self) { days in
+                        Text(Self.retentionDisplayName(days)).tag(days)
+                    }
+                }
+            }
+
             Section("Intérprete Python") {
                 TextField("Ruta manual (opcional)", text: pythonPathBinding)
                 if let detectedPath {
@@ -86,6 +94,26 @@ struct SettingsView: View {
             get: { appState.settings.pythonPath },
             set: { appState.settings.pythonPath = $0 }
         )
+    }
+
+    private var historyRetentionBinding: Binding<Int> {
+        Binding(
+            get: { appState.settings.historyRetentionDays },
+            set: { appState.settings.historyRetentionDays = $0 }
+        )
+    }
+
+    private static let retentionOptions = [0, 7, 30, 90, 365]
+
+    private static func retentionDisplayName(_ days: Int) -> String {
+        switch days {
+        case 0: return "Ilimitado"
+        case 7: return "7 días"
+        case 30: return "30 días"
+        case 90: return "90 días"
+        case 365: return "365 días"
+        default: return "\(days) días"
+        }
     }
 
     private func saveToken() {

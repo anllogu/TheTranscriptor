@@ -9,7 +9,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Current state: Fases 0-6 implementadas** (cimientos, contrato del script,
 núcleo Swift, interfaz completa con grabación de micrófono, y el pulido de
 Fase 6: atajos ⌘N/⌘,/⌘C, estado vacío en `ResultView`, `defaultSize` de
-ventana y revisión de modo oscuro — ver `docs/plans/03-plan-fase-5-6.md`).
+ventana y revisión de modo oscuro — ver `docs/plans/03-plan-fase-5-6.md`),
+más un **historial de transcripciones** (CU-08, `docs/02-diseno-tecnico.md
+§4.6`): cada transcripción completada se persiste automáticamente vía
+`HistoryStore` y se consulta desde la ventana "Historial" (⌘Y).
 Pendiente: ejecutar manualmente en el Mac del usuario la checklist de
 regresión E2E en `docs/plans/checklist-regresion-e2e.md` (fixtures reales,
 permisos del sistema, apps externas — nada de esto es accionable por un
@@ -55,7 +58,8 @@ Swift side:
 - **State machine, not navigation:** `AppState.phase` (`@Observable` enum: checkingRequirements / idle / recording / processing / result / error) drives a `switch` in `MainView`. No NavigationStack.
 - **Concurrency:** async/await + `AsyncStream` for pipeline events; read stdout *and* stderr pipes continuously from process start (full pipe buffers deadlock the child). Cancel = SIGTERM, then SIGKILL after 5 s.
 - **Layout:** `Views/`, `Models/`, `Services/` per §2. Core service is `PythonPipelineService`; exporters (`TxtExporter`, `SrtExporter`) are pure `Transcript → String` functions and unit-tested.
-- Speaker renames live in `Transcript.speakerNames` (`"SPEAKER_00" → "Angel"`); original segment data is never mutated.
+- Speaker renames live in `Transcript.speakerNames` (`"SPEAKER_00" → "Angel"`); original segment data is never mutated. `Transcript` has a manual `init(from:)` (not synthesized) so `speakerNames` round-trips through `Codable` via `decodeIfPresent(...) ?? [:]` — needed for the history feature below; `result.json` from the script never includes the key, which is why the fallback exists.
+- `HistoryStore` (singleton, same pattern as `LogStore`) persists one JSON file per completed transcription under `Application Support/TheTranscriptor/history/<uuid>.json` — deliberately **not** under `work/`, which `PythonPipelineService.purgeOrphanedWorkDirs()` empties on every launch. History must survive restarts; retention is opt-in via `SettingsStore.historyRetentionDays` (`0` = unlimited), purged in `applyRetentionPolicy(retentionDays:)` after each save and once at launch.
 
 ## Hard rules (from docs/03-faseado.md)
 
@@ -88,6 +92,12 @@ Swift side:
   `LogStore.shared`, an in-memory ring buffer (not persisted to disk). It's
   a live debugging aid, not user-facing app logging — don't route
   `@@`-protocol-parsed state through it, only raw lines.
+- `TheTranscriptor/Views/HistoryWindowView.swift` (⌘Y / menu "Mostrar/Ocultar
+  historial") mirrors the debug-log window's `Window(id:)` +
+  `Commands`-with-toggle-label pattern exactly (`HistoryStore.isWindowOpen`
+  set in `onAppear`/`onDisappear`, same as `LogStore.isWindowOpen`). If you
+  add another toggleable window, keep the keyboard shortcut collision-free:
+  ⌘N/⌘,/⌘C/⌘L/⌘Y are already taken.
 - The soft-block (CU-06) gates on **ffmpeg, Python, packages, and the HF
   token** — `AppState.checkRequirements` no longer filters the token out of
   the blocking set (reverted after real-world testing: a missing/not-yet-
