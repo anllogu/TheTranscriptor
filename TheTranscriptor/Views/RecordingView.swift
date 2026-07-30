@@ -4,10 +4,6 @@ import SwiftUI
 struct RecordingView: View {
     @Environment(AppState.self) private var appState
 
-    @State private var permissionDenied = false
-    @State private var systemPermissionFailed = false
-    @State private var errorMessage: String?
-
     private var isMeeting: Bool { appState.recordingMode == .meeting }
     private var recorder: AudioRecorderService { appState.recorder }
     private var meeting: MeetingRecorderService { appState.meetingRecorder }
@@ -16,14 +12,19 @@ struct RecordingView: View {
         VStack(spacing: 24) {
             Spacer()
 
-            if permissionDenied {
+            switch appState.recordingStartError {
+            case .microphonePermissionDenied:
                 permissionDeniedView
-            } else if systemPermissionFailed {
+            case .systemAudioFailed:
                 systemPermissionView
-            } else if isMeeting {
-                meetingContent
-            } else {
-                microphoneContent
+            case .startFailed(let message):
+                startFailedView(message)
+            case .none:
+                if isMeeting {
+                    meetingContent
+                } else {
+                    microphoneContent
+                }
             }
 
             Spacer()
@@ -42,11 +43,6 @@ struct RecordingView: View {
 
             AudioLevelMeter(level: recorder.level)
                 .padding(.horizontal, 40)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-            }
 
             HStack(spacing: 16) {
                 if recorder.state == .recording {
@@ -96,11 +92,6 @@ struct RecordingView: View {
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
             .frame(maxWidth: 380)
-
-            if let errorMessage {
-                Text(errorMessage)
-                    .foregroundStyle(.red)
-            }
 
             HStack(spacing: 16) {
                 Button("Detener") {
@@ -172,36 +163,36 @@ struct RecordingView: View {
         }
     }
 
+    private func startFailedView(_ message: String) -> some View {
+        VStack(spacing: 12) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 40))
+                .foregroundStyle(.orange)
+            Text("No se pudo iniciar la grabación")
+                .font(.title3.bold())
+            Text(message)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 360)
+                .foregroundStyle(.secondary)
+            Button("Volver") {
+                appState.reset()
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
     // MARK: - Arranque
 
     private func beginIfNeeded() async {
+        // Si la grabación ya está en marcha (p. ej. iniciada desde el icono de
+        // la bandeja y la ventana se abre después), no rearrancar: la vista
+        // solo refleja el estado. El arranque real vive en AppState.
         if isMeeting {
-            guard meeting.state == .idle else { return }
-            let granted = await meeting.requestMicrophonePermission()
-            guard granted else {
-                permissionDenied = true
-                return
-            }
-            do {
-                try meeting.start()
-            } catch MeetingRecorderService.RecorderError.systemAudioFailed {
-                systemPermissionFailed = true
-            } catch {
-                errorMessage = "No se pudo iniciar la grabación: \(error.localizedDescription)"
-            }
+            guard meeting.state == .idle, appState.recordingStartError == nil else { return }
         } else {
-            guard recorder.state == .idle else { return }
-            let granted = await recorder.requestPermission()
-            guard granted else {
-                permissionDenied = true
-                return
-            }
-            do {
-                try recorder.start()
-            } catch {
-                errorMessage = "No se pudo iniciar la grabación: \(error.localizedDescription)"
-            }
+            guard recorder.state == .idle, appState.recordingStartError == nil else { return }
         }
+        await appState.startRecording(mode: appState.recordingMode)
     }
 
     private func timeLabel(_ seconds: TimeInterval) -> String {

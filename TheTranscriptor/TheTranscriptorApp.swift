@@ -2,10 +2,11 @@ import SwiftUI
 
 @main
 struct TheTranscriptorApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var appState = AppState()
 
     var body: some Scene {
-        WindowGroup {
+        Window("The Transcriptor", id: "main") {
             MainView()
                 .environment(appState)
                 .task {
@@ -24,6 +25,15 @@ struct TheTranscriptorApp: App {
             LogWindowCommands()
             HistoryWindowCommands()
         }
+
+        MenuBarExtra {
+            MenuBarContentView()
+                .environment(appState)
+        } label: {
+            MenuBarLabel()
+                .environment(appState)
+        }
+        .menuBarExtraStyle(.menu)
 
         Window("Registro de depuración", id: "debug-log") {
             LogWindowView()

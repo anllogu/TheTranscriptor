@@ -102,6 +102,10 @@ Swift side:
 4. Temp files (recording WAVs, work dirs `App Support/TheTranscriptor/work/<UUID>/`) are
    always cleaned up — on success, error, cancel, and orphan purge at launch. The original
    audio file is only deleted when the "Borrar audio" setting is on.
+5. **Before every commit**, review whether the change requires updating the docs
+   (`docs/01-funcional.md`, `docs/02-diseno-tecnico.md`, `docs/03-faseado.md`) and/or these
+   two instruction files (`CLAUDE.md` and `.github/copilot-instructions.md`) — keep them in
+   sync as part of the same commit. When the user asks to commit, always do this check first.
 
 ## Gotchas
 
@@ -191,3 +195,18 @@ Swift side:
   `SystemAudioRecorderService.start()` throws on hard failures and `RecordingView` surfaces
   a "abrir Ajustes del Sistema" screen; silent-capture (missing permission) is diagnosable
   via the ⌘L debug log (source `sysaudio`: "IOProc del tap activo" but level stays 0.00).
+- **Menu bar / app solo de bandeja (CU-10, §4.8):** the app runs as a menu bar app —
+  `LSUIElement=true` in `project.yml` starts it **with no Dock icon**. An `AppDelegate`
+  (`@NSApplicationDelegateAdaptor`) toggles the activation policy between `.accessory` (no
+  Dock) and `.regular` (Dock + focus) based on whether a content window is visible (observes
+  `NSWindow` key/main/willClose; excludes the closing window, still in `NSApp.windows`). The
+  main scene is a `Window(id: "main")` (not `WindowGroup`) so `openWindow(id:)` reuses one
+  window. `MenuBarExtra` uses `.menu` style so its content is a rebuilt snapshot on open (the
+  recording timer isn't live); `MenuBarLabel` is the always-alive icon and hosts
+  `.onChange(of: appState.isProcessing)` to auto-open the main window when processing starts
+  after a tray-initiated recording. Recording start (permission + `recorder.start()`) now
+  lives in `AppState.startRecording(mode:)` (async, idempotent) so recording can start
+  headlessly; start failures live in `AppState.recordingStartError` (`RecordingView` renders
+  them regardless of who started the recording). Tray-menu shortcuts (⌥⌘R/⌥⌘M) only work
+  while the app is frontmost — menu accelerators, not global hotkeys. Keep `01-funcional.md`
+  CU-10 / `02-diseno-tecnico.md §4.8` in sync when touching this.

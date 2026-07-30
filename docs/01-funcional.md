@@ -148,6 +148,31 @@ sistema.
 
 **Requiere macOS 14.4+** (Core Audio process taps).
 
+### CU-10 · Grabación rápida desde el icono de la bandeja
+1. La app vive en la **barra de menús** (icono de forma de onda) y **no
+   aparece en el Dock** salvo cuando hay una ventana abierta. Esto permite
+   lanzar grabaciones sin tener que abrir la ventana.
+2. Al pulsar el icono se despliega un menú cuyo contenido depende del estado:
+   - **Listo:** "Grabar con micrófono", "Grabar reunión (micro + sistema)",
+     "Transcribir archivo…" (selector de archivos), "Historial…", "Ajustes…",
+     "Abrir The Transcriptor" y "Salir".
+   - **Grabando:** estado con cronómetro (p. ej. "● Grabando micrófono —
+     00:42"), "Pausar/Reanudar" (solo micrófono), "Detener y transcribir",
+     "Cancelar grabación", "Abrir The Transcriptor" y "Salir".
+   - **Procesando:** "Transcribiendo…", "Abrir The Transcriptor" y "Salir".
+   - **Requisitos pendientes:** "Requisitos pendientes — Configurar…" (abre la
+     ventana en la pantalla de requisitos) con la grabación deshabilitada.
+3. La grabación iniciada desde la bandeja transcurre **en segundo plano** (sin
+   abrir ventana); se controla desde el propio menú. Los permisos de micrófono
+   y de audio del sistema se piden igual que en CU-04/CU-09.
+4. Al **detener** se abre automáticamente la ventana principal para ver el
+   progreso del procesado y el resultado.
+5. "Salir" durante una grabación cancela y **limpia el WAV temporal** antes de
+   cerrar la app.
+
+**Requiere macOS 14+** (`MenuBarExtra`); las grabaciones de reunión requieren
+macOS 14.4+ como CU-09.
+
 ## 4. Requisitos no funcionales
 
 - **Privacidad:** cero peticiones de red desde la propia app; la única red la

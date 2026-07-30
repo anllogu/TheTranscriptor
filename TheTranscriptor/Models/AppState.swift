@@ -14,10 +14,20 @@ enum RecordingMode {
     case meeting
 }
 
+/// Fallo al *arrancar* una grabación. Vive en `AppState` (no en la vista)
+/// para que `RecordingView` lo pinte igual tanto si la grabación se inició
+/// desde la ventana como desde el icono de la bandeja (donde no hay vista).
+enum RecordingStartError: Equatable {
+    case microphonePermissionDenied
+    case systemAudioFailed
+    case startFailed(String)
+}
+
 @Observable
 final class AppState {
     var phase: AppPhase = .idle
     var recordingMode: RecordingMode = .microphone
+    var recordingStartError: RecordingStartError?
     let settings: SettingsStore
     let recorder: AudioRecorderService
     let meetingRecorder: MeetingRecorderService
@@ -114,7 +124,68 @@ final class AppState {
 
     func beginRecording(mode: RecordingMode = .microphone) {
         recordingMode = mode
+        recordingStartError = nil
         phase = .recording
+    }
+
+    /// Pide permiso y arranca el recorder correspondiente. Centraliza aquí lo
+    /// que antes vivía en `RecordingView.beginIfNeeded`, de modo que la
+    /// grabación pueda iniciarse **sin ventana** (desde el icono de la
+    /// bandeja). Es idempotente: si el recorder ya está grabando (p. ej. la
+    /// ventana se abre a media grabación) no rearranca.
+    @MainActor
+    func startRecording(mode: RecordingMode) async {
+        recordingMode = mode
+        recordingStartError = nil
+        phase = .recording
+
+        switch mode {
+        case .microphone:
+            guard recorder.state == .idle else { return }
+            guard await recorder.requestPermission() else {
+                recordingStartError = .microphonePermissionDenied
+                return
+            }
+            do {
+                try recorder.start()
+            } catch {
+                recordingStartError = .startFailed(error.localizedDescription)
+            }
+        case .meeting:
+            guard meetingRecorder.state == .idle else { return }
+            guard await meetingRecorder.requestMicrophonePermission() else {
+                recordingStartError = .microphonePermissionDenied
+                return
+            }
+            do {
+                try meetingRecorder.start()
+            } catch MeetingRecorderService.RecorderError.systemAudioFailed {
+                recordingStartError = .systemAudioFailed
+            } catch {
+                recordingStartError = .startFailed(error.localizedDescription)
+            }
+        }
+    }
+
+    /// ¿Está la app en un estado en el que se puede iniciar una grabación?
+    /// Lo usa el menú de la bandeja para habilitar/deshabilitar sus items.
+    var canStartRecording: Bool {
+        switch phase {
+        case .idle, .result, .error:
+            return true
+        default:
+            return false
+        }
+    }
+
+    var isRecording: Bool {
+        if case .recording = phase { return true }
+        return false
+    }
+
+    var isProcessing: Bool {
+        if case .processing = phase { return true }
+        return false
     }
 
     func cancelRecording() {
@@ -124,6 +195,7 @@ final class AppState {
         case .meeting:
             meetingRecorder.cancelAndDelete()
         }
+        recordingStartError = nil
         phase = .idle
     }
 
@@ -219,6 +291,7 @@ final class AppState {
     }
 
     func reset() {
+        recordingStartError = nil
         phase = .idle
     }
 

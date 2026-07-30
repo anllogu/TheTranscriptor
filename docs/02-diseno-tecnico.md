@@ -307,6 +307,46 @@ script (§3.4).
   concedido) se diagnostica con el registro ⌘L (fuente `sysaudio`). Requiere App
   Sandbox y Hardened Runtime desactivados (ya lo están).
 
+### 4.8 Icono de la bandeja (`MenuBarExtra`) y app solo de bandeja
+
+Grabación rápida desde la barra de menús (CU-10) sin abrir la ventana.
+
+- **App solo de bandeja:** `LSUIElement=true` en el Info.plist (declarado en
+  `project.yml`) arranca la app **sin icono en el Dock** ni barra de menús de
+  aplicación. Un `AppDelegate` (`@NSApplicationDelegateAdaptor`) alterna la
+  *activation policy* entre `.accessory` (sin Dock) y `.regular` (con Dock y
+  foco) según haya o no una ventana de contenido visible: observa
+  `NSWindow.didBecomeKey/didBecomeMain/willClose` y recuenta las ventanas que
+  pueden ser main (excluye la que se está cerrando, que aún figura en
+  `NSApp.windows`). Al abrir una ventana desde la bandeja se llama a
+  `NSApp.activate(ignoringOtherApps:)` para traerla al frente.
+- **Scene `MenuBarExtra`** con estilo `.menu`. El contenido
+  (`MenuBarContentView`) se reconstruye al abrir el menú y compone los items
+  según `AppState.phase` (listo / grabando / procesando / requisitos
+  pendientes). Usa `@Environment(\.openWindow)`, `@Environment(\.openSettings)`
+  y `NSOpenPanel` (para "Transcribir archivo…"). Al ser `.menu`, el cronómetro
+  refleja el tiempo en el instante de abrir el menú (los menús nativos no se
+  refrescan en vivo).
+- **`MenuBarLabel`** es el icono (siempre vivo en la barra de estado): cambia
+  entre `waveform` y `waveform.circle.fill` al grabar y, vía
+  `.onChange(of: appState.isProcessing)`, **auto-abre la ventana principal**
+  cuando la app entra en procesado tras una grabación iniciada en la bandeja.
+- **Ventana principal como `Window(id: "main")`** (antes `WindowGroup`) para que
+  `openWindow(id:)` reutilice la misma ventana en vez de crear instancias.
+- **Arranque de grabación en `AppState`:** la lógica de permiso + arranque del
+  recorder se movió de `RecordingView.beginIfNeeded` a
+  `AppState.startRecording(mode:)` (async, idempotente) para poder grabar sin
+  vista. El fallo de arranque vive en `AppState.recordingStartError`
+  (`.microphonePermissionDenied` / `.systemAudioFailed` / `.startFailed`), que
+  `RecordingView` pinta igual venga de la ventana o de la bandeja. `DropZoneView`
+  sigue usando `beginRecording(mode:)`; `RecordingView.beginIfNeeded` delega en
+  `startRecording` solo si el recorder está `idle` y no hay error previo.
+- **Salir:** el item "Salir" cancela y limpia el WAV temporal
+  (`cancelRecording`) antes de `NSApplication.terminate` si se está grabando.
+- Atajos ocupados tras CU-10: ⌘N/⌘,/⌘C/⌘L/⌘Y/⌘Q y (en el menú de la bandeja)
+  ⌥⌘R / ⌥⌘M. Los atajos del menú de la bandeja solo actúan con la app en primer
+  plano (no son hotkeys globales).
+
 ## 5. Modelo de estado y navegación
 
 ```swift
