@@ -18,6 +18,7 @@ targets:
       path: TheTranscriptor/Info.plist
       properties:
         NSMicrophoneUsageDescription: "The Transcriptor usa el micrófono para grabar audio que se transcribe íntegramente en este Mac; nada se envía a internet."
+        NSAudioCaptureUsageDescription: "The Transcriptor captura el audio del sistema (la otra parte de la reunión) para transcribirlo íntegramente en este Mac; nada se envía a internet."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.allosa.TheTranscriptor

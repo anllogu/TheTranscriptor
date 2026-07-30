@@ -65,6 +65,12 @@ struct DropZoneView: View {
                     Label("Grabar reunión (micro + sistema)", systemImage: "person.wave.2.fill")
                 }
                 .buttonStyle(.bordered)
+
+                Text("Consejo: en reunión, usa cascos para evitar que el audio del sistema se cuele por el micrófono.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 380)
             }
 
             Spacer()

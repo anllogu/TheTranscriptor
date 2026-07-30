@@ -155,8 +155,17 @@ Swift side:
   `MeetingRecorderService(mic:)`), since the mic-only and meeting modes are
   never concurrent.
 - The system-audio TCC permission ("Grabación de audio del sistema", under
-  Privacy → Screen & System Audio Recording) is prompted automatically by the
-  OS on first tap creation — no dedicated Info.plist usage-description key is
-  required, and it works only because App Sandbox and Hardened Runtime are
-  disabled. `SystemAudioRecorderService.start()` throws on failure and
-  `RecordingView` surfaces a "abrir Ajustes del Sistema" screen.
+  Privacy → Screen & System Audio Recording) requires the
+  **`NSAudioCaptureUsageDescription`** key in Info.plist (declared in
+  `project.yml` under the target's `info.properties`, next to
+  `NSMicrophoneUsageDescription`). Without that key macOS never shows the
+  prompt and the process tap silently delivers **all-zero (silent) buffers** —
+  the IOProc still fires with correctly-sized buffers, so it looks like it's
+  working (frame counter grows) but every sample is 0. This bit us: the meeting
+  feature shipped without the key and never captured any real system audio. The
+  prompt appears on first tap creation once the key is present; it works only
+  because App Sandbox and Hardened Runtime are disabled.
+  `SystemAudioRecorderService.start()` throws on hard failures and
+  `RecordingView` surfaces a "abrir Ajustes del Sistema" screen; silent-capture
+  (missing permission) is diagnosable via the ⌘L debug log (source `sysaudio`:
+  "IOProc del tap activo" but level stays 0.00).

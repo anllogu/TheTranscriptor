@@ -91,6 +91,17 @@
       Historial (CU-08), no dos
 - [ ] Durante la grabación se ven los **dos medidores** de nivel (micro y
       sistema) moviéndose de forma independiente
+- [ ] **Captura de sistema con cualquier salida** (bug corregido): grabar una
+      reunión con **cascos con cable**, **Bluetooth/AirPods** y **USB/DAC**;
+      en los tres casos el medidor "Sistema (salida de audio)" se mueve al
+      sonar audio y la pista `system-*.wav` tiene contenido audible (no
+      silencio) y aparece transcrita. En el registro de depuración (⌘L,
+      fuente `sysaudio`) el dispositivo de salida y el formato del tap
+      coinciden con los cascos y el contador de "frames" crece
+- [ ] **Cambio de dispositivo de salida a mitad de grabación**: empezar con
+      altavoces y conectar cascos (o al revés) mientras se graba → el log
+      `sysaudio` registra "reconstruida sobre el nuevo dispositivo" y la pista
+      del sistema sigue captando audio tras el cambio
 - [ ] Cancelar una grabación de reunión → `mic.wav` y `system-*.wav` borrados
       del disco (`recordings/`, verificado con `ls`); no queda tap/aggregate
       device colgado (verificar en `Ajustes de Audio MIDI` que no quedan
@@ -106,9 +117,11 @@
       interlocutores queda razonablemente alineado en el tiempo (si hay
       desfase sistemático, ajustar el cálculo de offsets en
       `MeetingRecorderService`)
-- [ ] Eco: al grabar por altavoces (sin auriculares), verificar si la voz
-      remota se cuela en el micro y se transcribe dos veces; documentar y,
-      si molesta, recomendar auriculares (cancelación de eco queda como
-      mejora futura)
+- [ ] Eco (cascos vs altavoces): con **cascos** no hay eco (validado: pista
+      del micro solo tu voz, sin duplicar al interlocutor) → **modo recomendado**.
+      Con **altavoces** la voz remota se cuela en el micro y se duplica; la UI
+      lo advierte y recomienda cascos. La cancelación de eco de macOS se
+      descartó (incompatible con el process tap del sistema); reducción de eco
+      por software = mejora futura
 - [ ] Modo oscuro: revisar `RecordingView` en modo reunión (dos medidores +
-      pantalla de permiso de sistema)
+      aviso de cascos + pantalla de permiso de sistema)

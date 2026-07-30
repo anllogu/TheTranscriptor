@@ -267,10 +267,18 @@ script (§3.4).
   sistema con *Core Audio process taps* (`AudioHardwareCreateProcessTap` +
   `CATapDescription(stereoGlobalTapButExcludeProcesses: [])`, macOS 14.4+)
   montados sobre un *aggregate device* privado — sin dispositivo virtual ni
-  extensión de kernel. Un `AudioDeviceIOProc` recibe los buffers del tap, los
+  extensión de kernel. El *aggregate* se vincula al **dispositivo de salida
+  por defecto real** (`kAudioHardwarePropertyDefaultOutputDevice` →
+  `kAudioAggregateDeviceMainSubDeviceKey`) para que herede su reloj y formato;
+  sin esto la captura solo era fiable con los altavoces integrados y quedaba
+  en silencio con cascos, USB o Bluetooth. Un listener de
+  `kAudioHardwarePropertyDefaultOutputDevice` reconstruye tap + aggregate +
+  converter si el usuario cambia de salida a mitad de grabación (sin cerrar el
+  WAV). Un `AudioDeviceIOProc` recibe los buffers del tap, los
   convierte a WAV mono 16 kHz PCM16 (mismo contrato de audio que
   `AudioRecorderService`) y calcula el nivel RMS. `muteBehavior = .unmuted`
-  para que el usuario siga oyendo la reunión.
+  para que el usuario siga oyendo la reunión. Vuelca diagnóstico (dispositivo
+  de salida, formato del tap, frames escritos) a `LogStore` (⌘L).
 - **`MeetingRecorderService`** coordina el micrófono
   (`AudioRecorderService`, **reutilizando la misma instancia** que el modo
   solo-micro para no crear un segundo `AVAudioEngine` en el arranque) y
@@ -278,12 +286,26 @@ script (§3.4).
   instante de inicio de cada pista para derivar los offsets de §3.4.
   Devuelve `(micURL, systemURL, micOffset, systemOffset)` a
   `AppState.runMeetingPipeline`. No soporta pausa/reanudación (se graba de
-  corrido para no desincronizar las pistas).
-- Permisos: micrófono (`AVCaptureDevice`) + "Grabación de audio del sistema"
-  (TCC; el prompt lo dispara el sistema al crear el tap). Si la captura de
-  sistema falla, `RecordingView` muestra una pantalla que enlaza a Ajustes
-  del Sistema. Requiere App Sandbox y Hardened Runtime desactivados (ya lo
-  están).
+  corrido para no desincronizar las pistas). **Grabar por altavoces provoca
+  eco** (la voz del interlocutor que sale por el altavoz se cuela en el micro y
+  se transcribe duplicada); la UI (`RecordingView`/`DropZoneView`) recomienda
+  cascos, que lo eliminan por completo. Se intentó la cancelación de eco de
+  macOS (`AVAudioInputNode.setVoiceProcessingEnabled(true)`) pero **entra en
+  conflicto con el process tap del sistema** (ambos pelean por el HAL / el
+  dispositivo de salida por defecto: el tap deja de entregar frames y se
+  disparan cambios de dispositivo espurios), así que queda descartada por ahora;
+  la reducción de eco por software es una mejora futura.
+- Permisos: micrófono (`AVCaptureDevice`, key `NSMicrophoneUsageDescription`) +
+  "Grabación de audio del sistema" (TCC). Este último **exige la key
+  `NSAudioCaptureUsageDescription` en el Info.plist** (declarada en
+  `project.yml`); sin ella macOS no muestra el prompt y el process tap entrega
+  **buffers en silencio (todo ceros)** aunque el IOProc dispare con normalidad
+  (el contador de frames crece pero el nivel se queda a 0). El prompt lo dispara
+  el sistema al crear el tap la primera vez, una vez presente la key. Si la
+  captura de sistema falla de forma dura, `RecordingView` muestra una pantalla
+  que enlaza a Ajustes del Sistema; el caso de "capta silencio" (permiso no
+  concedido) se diagnostica con el registro ⌘L (fuente `sysaudio`). Requiere App
+  Sandbox y Hardened Runtime desactivados (ya lo están).
 
 ## 5. Modelo de estado y navegación
 

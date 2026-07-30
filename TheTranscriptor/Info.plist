@@ -18,6 +18,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>The Transcriptor captura el audio del sistema (la otra parte de la reunión) para transcribirlo íntegramente en este Mac; nada se envía a internet.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>The Transcriptor usa el micrófono para grabar audio que se transcribe íntegramente en este Mac; nada se envía a internet.</string>
 </dict>

@@ -84,9 +84,18 @@ struct RecordingView: View {
 
             VStack(spacing: 12) {
                 levelRow(title: "Tú (micrófono)", level: meeting.micLevel)
-                levelRow(title: "Sistema (altavoces)", level: meeting.systemLevel)
+                levelRow(title: "Sistema (salida de audio)", level: meeting.systemLevel)
             }
             .padding(.horizontal, 40)
+
+            Label(
+                "Para mejores resultados usa cascos. Con altavoces, la voz del interlocutor puede colarse por el micro y aparecer duplicada en la transcripción.",
+                systemImage: "headphones"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .frame(maxWidth: 380)
 
             if let errorMessage {
                 Text(errorMessage)
