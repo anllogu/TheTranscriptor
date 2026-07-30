@@ -75,3 +75,40 @@
       el conflicto que anticipa §4.1 del plan — solución: limitar el
       `.keyboardShortcut` al botón enfocado o quitarlo y depender solo del
       menú Edit)
+
+## Grabación de reunión (CU-09 · micro + audio del sistema)
+
+> Requiere macOS 14.4+ y validación en el Mac del usuario: los prompts TCC,
+> la captura real de audio del sistema y la sincronización entre pistas no
+> son accionables por un agente.
+
+- [ ] Primer uso de "Grabar reunión (micro + sistema)" → macOS pide permiso
+      de micrófono y de "Grabación de audio del sistema"; conceder ambos
+- [ ] Reproducir audio en otra app (p. ej. un vídeo con 2 voces) + hablar por
+      el micro → al detener, la transcripción fusiona ambas: la voz local
+      como "Yo" y las remotas como "Interlocutor 1/2/…"
+- [ ] La transcripción de reunión aparece como **una sola entrada** en el
+      Historial (CU-08), no dos
+- [ ] Durante la grabación se ven los **dos medidores** de nivel (micro y
+      sistema) moviéndose de forma independiente
+- [ ] Cancelar una grabación de reunión → `mic.wav` y `system-*.wav` borrados
+      del disco (`recordings/`, verificado con `ls`); no queda tap/aggregate
+      device colgado (verificar en `Ajustes de Audio MIDI` que no quedan
+      dispositivos "TheTranscriptor Aggregate")
+- [ ] El usuario sigue **oyendo** la reunión mientras se graba (el tap usa
+      `muteBehavior = .unmuted`)
+- [ ] Denegar el permiso de audio del sistema → `RecordingView` muestra la
+      pantalla de error con enlace a Ajustes del Sistema, sin dejar el micro
+      grabando a medias
+- [ ] Sin token HF → el modo reunión falla igual que la transcripción de
+      archivo (pyannote sobre la pista del sistema), con mensaje accionable
+- [ ] Sincronización: comprobar que el diálogo entre "Yo" y los
+      interlocutores queda razonablemente alineado en el tiempo (si hay
+      desfase sistemático, ajustar el cálculo de offsets en
+      `MeetingRecorderService`)
+- [ ] Eco: al grabar por altavoces (sin auriculares), verificar si la voz
+      remota se cuela en el micro y se transcribe dos veces; documentar y,
+      si molesta, recomendar auriculares (cancelación de eco queda como
+      mejora futura)
+- [ ] Modo oscuro: revisar `RecordingView` en modo reunión (dos medidores +
+      pantalla de permiso de sistema)

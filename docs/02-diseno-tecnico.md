@@ -115,6 +115,37 @@ protocolo robusto frente al ruido de faster-whisper/pyannote.
 }
 ```
 
+### 3.4 Modo dos pistas (grabación de reunión)
+
+Para grabar reuniones online (micro + audio del sistema, CU-09) el script
+admite una invocación alternativa con **dos pistas separadas**:
+
+```
+python3 transcriptor_local.py \
+    --input-mic <mic.wav> --input-system <system.wav> \
+    [--mic-offset <seg>] [--system-offset <seg>] \
+    --output-dir <dir_resultados> \
+    --model <...> --json [--keep-audio]
+```
+
+- La pista de **micrófono** se transcribe y se etiqueta ENTERA como
+  `SPEAKER_00` (voz local = "Yo"), sin diarización.
+- La pista del **sistema** pasa por el flujo completo de una pista
+  (transcribe → pyannote → merge) para separar varios interlocutores
+  remotos; sus etiquetas de pyannote se **renumeran** a `SPEAKER_01`,
+  `SPEAKER_02`, … por orden de aparición para no colisionar con el micro.
+- A cada pista se le suma su offset (`--mic-offset`/`--system-offset`, en
+  segundos, relativos al inicio común de la grabación) antes de fusionar.
+- Ambas listas de segmentos se **fusionan ordenadas por `start`** en un único
+  `result.json` con el mismo formato de §3.3. El resultado es una sola
+  transcripción/entrada de historial, idéntica a cualquier otra.
+- Requiere `HF_TOKEN` (usa pyannote sobre la pista del sistema). `--input` es
+  mutuamente excluyente con `--input-mic`/`--input-system`.
+
+Los nombres amables ("Yo"/"Interlocutor N") no los produce el script: se
+pre-cargan en `Transcript.speakerNames` desde Swift
+(`AppState.defaultMeetingSpeakerNames`) al crear el `HistoryEntry`.
+
 ## 4. Servicios — diseño detallado
 
 ### 4.1 `PythonPipelineService`
@@ -225,6 +256,34 @@ mismo patrón que "Registro de depuración": `NavigationSplitView` con lista
 de entradas y detalle (misma estructura de lista de segmentos que
 `ResultView`, con "Eliminar del historial" en vez de "Nueva
 transcripción").
+
+### 4.7 `SystemAudioRecorderService` y `MeetingRecorderService`
+
+Grabación de reunión (CU-09): captura simultánea de micrófono y audio del
+sistema como **dos pistas separadas** que alimentan el modo dos pistas del
+script (§3.4).
+
+- **`SystemAudioRecorderService`** captura TODO el audio de salida del
+  sistema con *Core Audio process taps* (`AudioHardwareCreateProcessTap` +
+  `CATapDescription(stereoGlobalTapButExcludeProcesses: [])`, macOS 14.4+)
+  montados sobre un *aggregate device* privado — sin dispositivo virtual ni
+  extensión de kernel. Un `AudioDeviceIOProc` recibe los buffers del tap, los
+  convierte a WAV mono 16 kHz PCM16 (mismo contrato de audio que
+  `AudioRecorderService`) y calcula el nivel RMS. `muteBehavior = .unmuted`
+  para que el usuario siga oyendo la reunión.
+- **`MeetingRecorderService`** coordina el micrófono
+  (`AudioRecorderService`, **reutilizando la misma instancia** que el modo
+  solo-micro para no crear un segundo `AVAudioEngine` en el arranque) y
+  `SystemAudioRecorderService`, arrancándolos a la vez y registrando el
+  instante de inicio de cada pista para derivar los offsets de §3.4.
+  Devuelve `(micURL, systemURL, micOffset, systemOffset)` a
+  `AppState.runMeetingPipeline`. No soporta pausa/reanudación (se graba de
+  corrido para no desincronizar las pistas).
+- Permisos: micrófono (`AVCaptureDevice`) + "Grabación de audio del sistema"
+  (TCC; el prompt lo dispara el sistema al crear el tap). Si la captura de
+  sistema falla, `RecordingView` muestra una pantalla que enlaza a Ajustes
+  del Sistema. Requiere App Sandbox y Hardened Runtime desactivados (ya lo
+  están).
 
 ## 5. Modelo de estado y navegación
 

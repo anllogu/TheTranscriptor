@@ -6,7 +6,7 @@ Contrato: docs/02-diseno-tecnico.md §3. Implementa:
     ffmpeg (normalización) -> faster-whisper (transcripción)
         -> pyannote-audio (diarización) -> merge por hablante
 
-Invocación:
+Invocación (modo una pista):
 
     python3 transcriptor_local.py \
         --input <ruta_audio> \
@@ -14,6 +14,24 @@ Invocación:
         --model <tiny|base|small|medium|large-v3> \
         --json \
         [--keep-audio]
+
+Invocación (modo dos pistas — grabación de reunión, §3.4):
+
+    python3 transcriptor_local.py \
+        --input-mic <mic.wav> --input-system <system.wav> \
+        [--mic-offset <seg>] [--system-offset <seg>] \
+        --output-dir <dir_resultados> \
+        --model <...> --json [--keep-audio]
+
+    En modo dos pistas la pista de micrófono se transcribe y se etiqueta ENTERA
+    como SPEAKER_00 (voz local = "Yo", sin diarización), y la pista del sistema
+    pasa por el flujo completo (transcribe -> pyannote -> merge) para separar
+    varios interlocutores remotos; sus etiquetas se renumeran a SPEAKER_01,
+    SPEAKER_02, ... por orden de aparición para no colisionar con el micrófono.
+    Ambas listas de segmentos se fusionan ordenadas por 'start' (tras aplicar
+    los offsets por pista). Requiere HF_TOKEN (usa pyannote sobre el sistema).
+    El result.json resultante tiene EXACTAMENTE el mismo formato que el modo de
+    una pista (§3.3).
 
 Protocolo de progreso por stdout (líneas con flush=True SIEMPRE):
 
@@ -84,7 +102,33 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         prog="transcriptor_local.py",
         description="Transcripción + diarización local (faster-whisper + pyannote-audio).",
     )
-    parser.add_argument("--input", required=True, help="Ruta al archivo de audio de entrada")
+    parser.add_argument("--input", required=False, help="Ruta al archivo de audio de entrada (modo una pista)")
+    parser.add_argument(
+        "--input-mic",
+        dest="input_mic",
+        required=False,
+        help="Modo dos pistas: ruta al audio del micrófono (voz local = 'Yo')",
+    )
+    parser.add_argument(
+        "--input-system",
+        dest="input_system",
+        required=False,
+        help="Modo dos pistas: ruta al audio del sistema (voces remotas, diarizadas)",
+    )
+    parser.add_argument(
+        "--mic-offset",
+        dest="mic_offset",
+        type=float,
+        default=0.0,
+        help="Desplazamiento en segundos a sumar a los tiempos de la pista de micrófono",
+    )
+    parser.add_argument(
+        "--system-offset",
+        dest="system_offset",
+        type=float,
+        default=0.0,
+        help="Desplazamiento en segundos a sumar a los tiempos de la pista del sistema",
+    )
     parser.add_argument("--output-dir", required=True, help="Directorio de resultados")
     parser.add_argument(
         "--model",
@@ -340,14 +384,136 @@ def write_result_json(
         json.dump(result, f, ensure_ascii=False, indent=2)
 
 
+def _apply_offset(segments: list[dict], offset: float) -> None:
+    """Suma `offset` (segundos) a los tiempos de cada segmento in-place."""
+    if not offset:
+        return
+    for seg in segments:
+        seg["start"] = seg["start"] + offset
+        seg["end"] = seg["end"] + offset
+
+
+def _relabel_speakers(segments: list[dict], start_index: int) -> None:
+    """Renumera las etiquetas de hablante a SPEAKER_<start_index+n> por orden
+    de primera aparición, in-place. Evita colisiones con la pista de micro."""
+    mapping: dict[str, str] = {}
+    next_index = start_index
+    for seg in segments:
+        original = seg["speaker"]
+        if original not in mapping:
+            mapping[original] = f"SPEAKER_{next_index:02d}"
+            next_index += 1
+        seg["speaker"] = mapping[original]
+
+
+def run_dual_track(args: argparse.Namespace, hf_token: str | None) -> str:
+    """Pipeline de dos pistas (grabación de reunión). Devuelve la ruta del
+    resultado (result.json o result.txt). Ver contrato §3.4."""
+    output_dir = os.path.abspath(args.output_dir)
+
+    mic_path = os.path.abspath(args.input_mic)
+    system_path = os.path.abspath(args.input_system)
+
+    # --- Pista de micrófono: transcripción sin diarización, todo SPEAKER_00 ---
+    mic_wav = convert_to_wav(mic_path, output_dir)
+    try:
+        mic_language, mic_duration, mic_segments = transcribe(mic_wav, args.model)
+    finally:
+        if os.path.exists(mic_wav):
+            try:
+                os.remove(mic_wav)
+            except OSError:
+                pass
+    for seg in mic_segments:
+        seg["speaker"] = "SPEAKER_00"
+    _apply_offset(mic_segments, args.mic_offset)
+
+    # --- Pista del sistema: transcripción + diarización pyannote ---
+    system_wav = convert_to_wav(system_path, output_dir)
+    try:
+        system_language, system_duration, system_whisper = transcribe(system_wav, args.model)
+        system_turns = diarize(system_wav, hf_token)
+    finally:
+        if os.path.exists(system_wav):
+            try:
+                os.remove(system_wav)
+            except OSError:
+                pass
+    system_segments = merge_segments(system_whisper, system_turns)
+    # Renumerar SPEAKER_00+ de pyannote a SPEAKER_01+ para no pisar el micro.
+    _relabel_speakers(system_segments, start_index=1)
+    _apply_offset(system_segments, args.system_offset)
+
+    # --- Fusión por tiempo en una sola transcripción ---
+    emit_phase("MERGING")
+    merged = sorted(mic_segments + system_segments, key=lambda s: s["start"])
+
+    language = mic_language or system_language or "es"
+    duration = max(
+        [s["end"] for s in merged] + [mic_duration, system_duration, 0.0]
+    )
+
+    txt_path = os.path.join(output_dir, "result.txt")
+    write_txt(merged, txt_path)
+
+    result_path = txt_path
+    if args.emit_json:
+        json_path = os.path.join(output_dir, "result.json")
+        write_result_json(language, duration, merged, json_path)
+        result_path = json_path
+
+    # Limpieza de los audios originales (respeta --keep-audio).
+    if not args.keep_audio:
+        for original in (mic_path, system_path):
+            if os.path.exists(original):
+                try:
+                    os.remove(original)
+                except OSError as exc:
+                    print(f"Aviso: no se pudo borrar el audio original: {exc}", file=sys.stderr)
+
+    return result_path
+
+
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
 
     hf_token = os.environ.get("HF_TOKEN")  # SOLO desde entorno, nunca CLI
 
-    input_path = os.path.abspath(args.input)
     output_dir = os.path.abspath(args.output_dir)
     os.makedirs(output_dir, exist_ok=True)
+
+    dual_track = bool(args.input_mic or args.input_system)
+
+    if dual_track:
+        # Validación de argumentos de modo dos pistas.
+        if not (args.input_mic and args.input_system):
+            emit_error("El modo dos pistas requiere --input-mic y --input-system")
+            print("Faltan --input-mic/--input-system", file=sys.stderr)
+            return 1
+        if args.input:
+            emit_error("--input no puede combinarse con --input-mic/--input-system")
+            print("--input es incompatible con el modo dos pistas", file=sys.stderr)
+            return 1
+        for label, path in (("micrófono", args.input_mic), ("sistema", args.input_system)):
+            if not os.path.isfile(os.path.abspath(path)):
+                emit_error(f"El archivo de {label} no existe: {path}")
+                print(f"Archivo de {label} no encontrado: {path}", file=sys.stderr)
+                return 1
+        try:
+            result_path = run_dual_track(args, hf_token)
+            emit_done(result_path)
+            return 0
+        except Exception as exc:  # noqa: BLE001 - capturar todo y reportar
+            emit_error(str(exc))
+            traceback.print_exc(file=sys.stderr)
+            return 1
+
+    if not args.input:
+        emit_error("Falta --input (o --input-mic/--input-system para modo dos pistas)")
+        print("No se indicó --input", file=sys.stderr)
+        return 1
+
+    input_path = os.path.abspath(args.input)
 
     if not os.path.isfile(input_path):
         emit_error(f"El archivo de entrada no existe: {input_path}")

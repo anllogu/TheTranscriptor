@@ -134,3 +134,29 @@ Swift side:
   buffers in another format (we use Int16 interleaved for the 16 kHz mono
   WAV contract), you must pass `commonFormat:`/`interleaved:` explicitly to
   the initializer or `write(from:)` throws on the first buffer.
+- **Meeting recording (CU-09, §3.4 / §4.7):** `SystemAudioRecorderService`
+  captures all system output audio via Core Audio process taps
+  (`AudioHardwareCreateProcessTap` +
+  `CATapDescription(stereoGlobalTapButExcludeProcesses:)`, **macOS 14.4+** —
+  that's why `project.yml` `deploymentTarget` was bumped from 14.0).
+  `MeetingRecorderService` coordinates mic + system as two tracks and feeds
+  the script's two-track mode (`--input-mic/--input-system` +
+  `--mic-offset/--system-offset`); pyannote runs only on the system track to
+  separate remote speakers (mic is always `SPEAKER_00` → "Yo"). Friendly
+  names ("Yo"/"Interlocutor N") are injected in Swift
+  (`AppState.defaultMeetingSpeakerNames`), never emitted by the script, so
+  `result.json` keeps the exact same shape and one history entry is produced.
+- **Don't construct two `AVAudioEngine`s at launch:** `AppState()` is created
+  eagerly (`@State private var appState = AppState()`); if its init blocks the
+  main thread the XCTest runner hangs with "test runner hung before
+  establishing connection" (no assertion failure, ~6 min timeout). This bit
+  us when `MeetingRecorderService` created its own `AudioRecorderService`
+  (second `AVAudioEngine`) — it now **shares** `AppState.recorder` (passed via
+  `MeetingRecorderService(mic:)`), since the mic-only and meeting modes are
+  never concurrent.
+- The system-audio TCC permission ("Grabación de audio del sistema", under
+  Privacy → Screen & System Audio Recording) is prompted automatically by the
+  OS on first tap creation — no dedicated Info.plist usage-description key is
+  required, and it works only because App Sandbox and Hardened Runtime are
+  disabled. `SystemAudioRecorderService.start()` throws on failure and
+  `RecordingView` surfaces a "abrir Ajustes del Sistema" screen.

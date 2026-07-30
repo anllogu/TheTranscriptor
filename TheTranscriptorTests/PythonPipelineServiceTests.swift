@@ -97,6 +97,37 @@ final class PythonPipelineServiceTests: XCTestCase {
         XCTAssertEqual(transcript.segments.first?.speaker, "SPEAKER_00")
     }
 
+    func testDualTrackRunProducesResultAndCleansBothInputs() async throws {
+        let micFile = tempDir.appendingPathComponent("mic.wav")
+        let systemFile = tempDir.appendingPathComponent("system.wav")
+        try Data("fake mic bytes".utf8).write(to: micFile)
+        try Data("fake system bytes".utf8).write(to: systemFile)
+
+        let settings = makeSettings()
+        var events: [PythonPipelineService.Event] = []
+
+        let stream = service.run(
+            dualTrack: micFile,
+            system: systemFile,
+            micOffset: 0.0,
+            systemOffset: 0.25,
+            settings: settings
+        )
+        for await event in stream {
+            events.append(event)
+        }
+
+        guard case .done(let resultURL) = events.last else {
+            return XCTFail("Expected last event to be .done, got: \(events)")
+        }
+        XCTAssertEqual(resultURL.lastPathComponent, "result.json")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: resultURL.path))
+
+        // Sin keep-audio, ambas pistas originales deben borrarse.
+        XCTAssertFalse(FileManager.default.fileExists(atPath: micFile.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemFile.path))
+    }
+
     func testUnprefixedStdoutLineIsIgnored() async throws {
         // The fixture prints "ruido de libreria" (no @@ prefix) between
         // PROGRESS and INFO:downloading_models. It must not produce an

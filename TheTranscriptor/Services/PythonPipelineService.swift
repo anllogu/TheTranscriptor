@@ -1,6 +1,14 @@
 import Foundation
 import CryptoKit
 
+/// Describes the audio input(s) for a pipeline run: a single file (drag &
+/// drop or mic-only recording) or two tracks (meeting recording — mic +
+/// system audio, see contract §3.4).
+enum PipelineInput: Equatable {
+    case single(URL)
+    case dualTrack(mic: URL, system: URL, micOffset: Double, systemOffset: Double)
+}
+
 /// Settings needed to launch the Python pipeline process.
 struct PipelineSettings {
     var pythonPath: String
@@ -125,6 +133,24 @@ final class PythonPipelineService {
     // MARK: - Public API
 
     func run(input: URL, settings: PipelineSettings) -> AsyncStream<Event> {
+        run(input: .single(input), settings: settings)
+    }
+
+    /// Two-track (meeting) run: mic + system audio. See contract §3.4.
+    func run(
+        dualTrack mic: URL,
+        system: URL,
+        micOffset: Double,
+        systemOffset: Double,
+        settings: PipelineSettings
+    ) -> AsyncStream<Event> {
+        run(
+            input: .dualTrack(mic: mic, system: system, micOffset: micOffset, systemOffset: systemOffset),
+            settings: settings
+        )
+    }
+
+    func run(input: PipelineInput, settings: PipelineSettings) -> AsyncStream<Event> {
         AsyncStream { continuation in
             let task = Task {
                 await self.runPipeline(input: input, settings: settings, continuation: continuation)
@@ -167,7 +193,7 @@ final class PythonPipelineService {
     // MARK: - Pipeline execution
 
     private func runPipeline(
-        input: URL,
+        input: PipelineInput,
         settings: PipelineSettings,
         continuation: AsyncStream<Event>.Continuation
     ) async {
@@ -200,11 +226,21 @@ final class PythonPipelineService {
 
         var arguments = [
             scriptURL.path,
-            "--input", input.path,
             "--output-dir", workDir.path,
             "--model", settings.model.rawValue,
             "--json"
         ]
+        switch input {
+        case .single(let url):
+            arguments.append(contentsOf: ["--input", url.path])
+        case .dualTrack(let mic, let system, let micOffset, let systemOffset):
+            arguments.append(contentsOf: [
+                "--input-mic", mic.path,
+                "--input-system", system.path,
+                "--mic-offset", String(format: "%.3f", micOffset),
+                "--system-offset", String(format: "%.3f", systemOffset)
+            ])
+        }
         if settings.keepAudio {
             arguments.append("--keep-audio")
         }

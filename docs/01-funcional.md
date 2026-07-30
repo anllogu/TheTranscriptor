@@ -123,6 +123,31 @@ cuatro requisitos estén en verde, pero nunca falla silenciosamente.
 - Retención configurable en Ajustes (ilimitado por defecto o purga
   automática pasados 7/30/90/365 días).
 
+### CU-09 · Grabar una reunión (micro + audio del sistema)
+1. Botón "Grabar reunión (micro + sistema)" en la pantalla principal. Permite
+   transcribir conversaciones online de cualquier app (Zoom, Meet, Teams…)
+   capturando a la vez el micrófono y el audio que suena por los altavoces.
+2. En el primer uso, macOS pide permiso de **micrófono** y de **Grabación de
+   audio del sistema**. Se captura todo el audio de salida del sistema.
+3. Durante la grabación: cronómetro `mm:ss` y **dos medidores de nivel**
+   ("Tú (micrófono)" y "Sistema (altavoces)"). Controles **Detener /
+   Cancelar** (sin pausa, para no desincronizar las pistas).
+4. Al detener, se transcriben las dos pistas y se **fusionan en una única
+   transcripción** ordenada por tiempo: la voz local aparece como "Yo" y las
+   voces remotas se separan (diarización con pyannote sobre la pista del
+   sistema) como "Interlocutor 1", "Interlocutor 2", … El usuario puede
+   renombrarlos como en cualquier transcripción. Se guarda **una sola entrada
+   en el historial** (CU-08), igual que el resto.
+5. Como usa pyannote, requiere el token de Hugging Face (CU-06), igual que la
+   transcripción de un archivo.
+
+**Errores:** micrófono denegado → pantalla que abre Ajustes →
+Privacidad → Micrófono. Fallo de captura de sistema (permiso no concedido) →
+pantalla que abre Ajustes → Privacidad → Grabación de pantalla y audio del
+sistema.
+
+**Requiere macOS 14.4+** (Core Audio process taps).
+
 ## 4. Requisitos no funcionales
 
 - **Privacidad:** cero peticiones de red desde la propia app; la única red la

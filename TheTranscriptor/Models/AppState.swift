@@ -9,11 +9,18 @@ enum AppPhase {
     case error(PipelineError)
 }
 
+enum RecordingMode {
+    case microphone
+    case meeting
+}
+
 @Observable
 final class AppState {
     var phase: AppPhase = .idle
+    var recordingMode: RecordingMode = .microphone
     let settings: SettingsStore
     let recorder: AudioRecorderService
+    let meetingRecorder: MeetingRecorderService
 
     var isSettingUpPython = false
     var setupLog: [String] = []
@@ -25,6 +32,7 @@ final class AppState {
     private var pipelineTask: Task<Void, Never>?
     private var currentInput: URL?
     private var currentModel: WhisperModel?
+    private var currentIsMeeting = false
 
     init(
         settings: SettingsStore = SettingsStore(),
@@ -32,7 +40,8 @@ final class AppState {
         keychainService: KeychainService = KeychainService(),
         requirementsChecker: RequirementsChecker = RequirementsChecker(),
         historyStore: HistoryStore = .shared,
-        recorder: AudioRecorderService = AudioRecorderService()
+        recorder: AudioRecorderService = AudioRecorderService(),
+        meetingRecorder: MeetingRecorderService? = nil
     ) {
         self.settings = settings
         self.pipelineService = pipelineService
@@ -40,6 +49,10 @@ final class AppState {
         self.requirementsChecker = requirementsChecker
         self.historyStore = historyStore
         self.recorder = recorder
+        // Comparte el mismo AudioRecorderService para no crear un segundo
+        // AVAudioEngine en el arranque (los modos micro/reunión no son
+        // concurrentes).
+        self.meetingRecorder = meetingRecorder ?? MeetingRecorderService(mic: recorder)
     }
 
     // MARK: - Aprovisionamiento automático de Python
@@ -99,17 +112,36 @@ final class AppState {
         phase = .recording
     }
 
+    func beginRecording(mode: RecordingMode = .microphone) {
+        recordingMode = mode
+        phase = .recording
+    }
+
     func cancelRecording() {
-        recorder.cancelAndDelete()
+        switch recordingMode {
+        case .microphone:
+            recorder.cancelAndDelete()
+        case .meeting:
+            meetingRecorder.cancelAndDelete()
+        }
         phase = .idle
     }
 
     func finishRecording() {
-        guard let url = recorder.stop() else {
-            phase = .idle
-            return
+        switch recordingMode {
+        case .microphone:
+            guard let url = recorder.stop() else {
+                phase = .idle
+                return
+            }
+            runPipeline(input: url)
+        case .meeting:
+            guard let result = meetingRecorder.stop() else {
+                phase = .idle
+                return
+            }
+            runMeetingPipeline(result: result)
         }
-        runPipeline(input: url)
     }
 
     // MARK: - Pipeline
@@ -131,11 +163,47 @@ final class AppState {
 
         currentInput = input
         currentModel = model
+        currentIsMeeting = false
         phase = .processing(.converting, progress: nil, downloading: false)
 
         pipelineTask?.cancel()
         pipelineTask = Task { [pipelineService] in
             let stream = pipelineService.run(input: input, settings: pipelineSettings)
+            for await event in stream {
+                await handle(event: event)
+            }
+        }
+    }
+
+    func runMeetingPipeline(result: MeetingRecorderService.Result) {
+        guard let scriptPath = bundledScriptURL() else {
+            phase = .error(PipelineError(message: "No se encontró el script Python embebido.", stderrTail: []))
+            return
+        }
+
+        let model = settings.getWhisperModel()
+        let pipelineSettings = PipelineSettings(
+            pythonPath: resolvedPythonPath(),
+            scriptPath: scriptPath,
+            model: model,
+            keepAudio: !settings.deleteAudioAfter,
+            hfToken: keychainService.token()
+        )
+
+        currentInput = result.micURL
+        currentModel = model
+        currentIsMeeting = true
+        phase = .processing(.converting, progress: nil, downloading: false)
+
+        pipelineTask?.cancel()
+        pipelineTask = Task { [pipelineService] in
+            let stream = pipelineService.run(
+                dualTrack: result.micURL,
+                system: result.systemURL,
+                micOffset: result.micOffset,
+                systemOffset: result.systemOffset,
+                settings: pipelineSettings
+            )
             for await event in stream {
                 await handle(event: event)
             }
@@ -185,10 +253,15 @@ final class AppState {
     private func decodeAndShowResult(from url: URL) {
         do {
             let data = try Data(contentsOf: url)
-            let transcript = try JSONDecoder().decode(Transcript.self, from: data)
+            var transcript = try JSONDecoder().decode(Transcript.self, from: data)
+            if currentIsMeeting {
+                transcript.speakerNames = Self.defaultMeetingSpeakerNames(for: transcript)
+            }
             let entry = HistoryEntry(
-                sourceFileName: currentInput?.lastPathComponent ?? "audio",
-                sourceAudioPath: currentInput?.path,
+                sourceFileName: currentIsMeeting
+                    ? "Reunión"
+                    : (currentInput?.lastPathComponent ?? "audio"),
+                sourceAudioPath: currentIsMeeting ? nil : currentInput?.path,
                 whisperModel: (currentModel ?? settings.getWhisperModel()).rawValue,
                 transcript: transcript
             )
@@ -199,6 +272,28 @@ final class AppState {
         } catch {
             phase = .error(PipelineError(message: "No se pudo leer el resultado: \(error.localizedDescription)", stderrTail: []))
         }
+    }
+
+    /// Nombres por defecto para una grabación de reunión: la pista de micro
+    /// (SPEAKER_00) es "Yo" y cada voz remota distinta (SPEAKER_01, …) se
+    /// numera "Interlocutor 1", "Interlocutor 2", … por orden de aparición.
+    /// El usuario puede renombrarlos después como en cualquier transcripción.
+    static func defaultMeetingSpeakerNames(for transcript: Transcript) -> [String: String] {
+        var names: [String: String] = [:]
+        var seen = Set<String>()
+        var interlocutorIndex = 1
+        for segment in transcript.segments {
+            let speaker = segment.speaker
+            guard !seen.contains(speaker) else { continue }
+            seen.insert(speaker)
+            if speaker == "SPEAKER_00" {
+                names[speaker] = "Yo"
+            } else {
+                names[speaker] = "Interlocutor \(interlocutorIndex)"
+                interlocutorIndex += 1
+            }
+        }
+        return names
     }
 
     // MARK: - Helpers

@@ -43,6 +43,23 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(transcript.segments[1].speaker, "SPEAKER_01")
     }
 
+    func testDefaultMeetingSpeakerNames() {
+        let segments = [
+            TranscriptSegment(start: 0.0, end: 2.0, speaker: "SPEAKER_00", text: "Hola"),
+            TranscriptSegment(start: 2.0, end: 4.0, speaker: "SPEAKER_01", text: "Buenas"),
+            TranscriptSegment(start: 4.0, end: 6.0, speaker: "SPEAKER_00", text: "¿Qué tal?"),
+            TranscriptSegment(start: 6.0, end: 8.0, speaker: "SPEAKER_02", text: "Bien"),
+        ]
+        let transcript = Transcript(language: "es", duration: 8.0, segments: segments)
+
+        let names = AppState.defaultMeetingSpeakerNames(for: transcript)
+
+        XCTAssertEqual(names["SPEAKER_00"], "Yo")
+        XCTAssertEqual(names["SPEAKER_01"], "Interlocutor 1")
+        XCTAssertEqual(names["SPEAKER_02"], "Interlocutor 2")
+        XCTAssertEqual(names.count, 3)
+    }
+
     func testTranscriptDisplayName() {
         var transcript = Transcript(language: "es", duration: 100.0, segments: [])
 

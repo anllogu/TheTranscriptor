@@ -19,7 +19,11 @@ def emit(line: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", required=True)
+    parser.add_argument("--input", required=False)
+    parser.add_argument("--input-mic", dest="input_mic", required=False)
+    parser.add_argument("--input-system", dest="input_system", required=False)
+    parser.add_argument("--mic-offset", dest="mic_offset", type=float, default=0.0)
+    parser.add_argument("--system-offset", dest="system_offset", type=float, default=0.0)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--json", action="store_true")
@@ -32,6 +36,8 @@ def main() -> int:
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+
+    dual_track = bool(args.input_mic or args.input_system)
 
     emit("@@PHASE:CONVERTING")
     time.sleep(0.05)
@@ -66,10 +72,16 @@ def main() -> int:
         json.dump(result, f)
 
     if not args.keep_audio:
-        try:
-            os.remove(args.input)
-        except OSError:
-            pass
+        inputs = [args.input] if args.input else []
+        if dual_track:
+            inputs = [args.input_mic, args.input_system]
+        for path in inputs:
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     emit(f"@@DONE:{result_path}")
     return 0

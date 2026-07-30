@@ -47,16 +47,25 @@ struct DropZoneView: View {
             }
             .padding(.horizontal, 40)
 
-            HStack(spacing: 16) {
-                Button("Elegir archivo…") {
-                    showImporter = true
+            VStack(spacing: 12) {
+                HStack(spacing: 16) {
+                    Button("Elegir archivo…") {
+                        showImporter = true
+                    }
+                    Button("Grabar con micrófono") {
+                        appState.beginRecording(mode: .microphone)
+                    }
+                    .keyboardShortcut("n", modifiers: .command)
                 }
-                Button("Grabar con micrófono") {
-                    appState.beginRecording()
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    appState.beginRecording(mode: .meeting)
+                } label: {
+                    Label("Grabar reunión (micro + sistema)", systemImage: "person.wave.2.fill")
                 }
-                .keyboardShortcut("n", modifiers: .command)
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
 
             Spacer()
         }
