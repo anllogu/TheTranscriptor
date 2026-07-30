@@ -29,6 +29,7 @@ TheTranscriptor/
 │   ├── ResultView.swift              # Lista de segmentos, renombrado, exportar
 │   ├── SettingsView.swift            # Scene Settings estándar de macOS
 │   ├── RequirementsView.swift        # Checklist ✓/✗ con instrucciones
+│   ├── VoiceMemosWindowView.swift    # Explorador/importador de Notas de voz (CU-11)
 │   └── Components/
 │       ├── PrivacyBadge.swift        # Indicador 🔒 / ⚠️ permanente
 │       ├── AudioLevelMeter.swift     # Barra/onda de nivel
@@ -39,6 +40,7 @@ TheTranscriptor/
 │   ├── Transcript.swift              # [segmentos] + speakerNames: [String: String]
 │   ├── PipelinePhase.swift           # enum: converting/transcribing/diarizing/merging
 │   ├── WhisperModel.swift            # enum tiny…large-v3 + descripción
+│   ├── VoiceMemo.swift               # nota de voz descubierta (CU-11)
 │   └── RequirementCheck.swift        # enum requisito + estado + instrucción
 ├── Services/
 │   ├── PythonPipelineService.swift   # Process + protocolo stdout (núcleo)
@@ -46,6 +48,7 @@ TheTranscriptor/
 │   ├── KeychainService.swift         # get/set/delete token HF (Security.framework)
 │   ├── SettingsStore.swift           # UserDefaults tipado (@AppStorage keys)
 │   ├── RequirementsChecker.swift     # ffmpeg, python, paquetes
+│   ├── VoiceMemosService.swift       # Notas de voz: BD SQLite + iCloud + copia (CU-11)
 │   ├── PythonEnvironmentDetector.swift # autodetección de intérpretes
 │   └── Exporters/
 │       ├── TxtExporter.swift
@@ -358,6 +361,58 @@ Grabación rápida desde la barra de menús (CU-10) sin abrir la ventana.
 - Atajos ocupados tras CU-10: ⌘N/⌘,/⌘C/⌘L/⌘Y/⌘Q y (en el menú de la bandeja)
   ⌥⌘R / ⌥⌘M. Los atajos del menú de la bandeja solo actúan con la app en primer
   plano (no son hotkeys globales).
+
+### 4.9 `VoiceMemosService` e importación desde Notas de voz
+
+Descubre e importa notas de la app **Notas de voz** de macOS (CU-11).
+
+- **Ubicación:** la biblioteca local vive en el contenedor de grupo
+  `~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/`
+  (los `.m4a` con nombres crípticos y una base SQLite `CloudRecordings.db` con
+  los metadatos). Como la app tiene el sandbox desactivado se lee sin
+  entitlements. `recordingsDirectoryOverride` permite inyectar una carpeta en
+  los tests.
+- **Lectura de metadatos:** se abre `CloudRecordings.db` con el módulo del
+  sistema `import SQLite3` (sin dependencias) y se lee la tabla
+  `ZCLOUDRECORDING` (`ZUNIQUEID`, `ZCUSTOMLABEL` = título, `ZDATE` = timestamp
+  Core Data en segundos desde 2001-01-01 → `Date(timeIntervalSinceReferenceDate:)`,
+  `ZDURATION`, `ZPATH`). El formato interno de Apple puede cambiar entre
+  versiones, así que si el `prepare` falla o la BD no existe se **cae a listar
+  los `.m4a`** de la carpeta con su fecha de creación (red de seguridad).
+- **`loadLibrary() -> Library`** devuelve `.ok([VoiceMemo])`, `.empty`
+  (contenedor presente pero sin notas), `.unavailable` (contenedor inexistente
+  / Notas de voz nunca abierta en este Mac) o `.accessDenied` (contenedor con
+  contenido pero bloqueado por TCC). La ventana pinta un mensaje según el caso.
+- **Permisos (TCC):** macOS protege el contenedor de Notas de voz; aunque el
+  sandbox esté desactivado, leerlo requiere **Acceso a disco completo**. Sin él,
+  `contentsOfDirectory`/abrir la BD devuelven `NSFileReadNoPermissionError`
+  (EPERM/EACCES) → se detecta y se devuelve `.accessDenied`, y la ventana ofrece
+  un botón que abre `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`.
+  El permiso de FDA exige **reiniciar la app**. La BD se abre con URI
+  `?immutable=1` (instantánea de solo lectura, sin tocar `-wal`/`-shm`).
+- **iCloud y copia:** `copyForTranscription(_:)` materializa la nota y la copia
+  a `NSTemporaryDirectory()/VoiceMemosImport/<uuid>/<título>.m4a`; se transcribe
+  **la copia**, nunca el original (la pipeline borra su `--input` si
+  `deleteAudioAfter` está activo, y eso jamás debe tocar la biblioteca de Notas
+  de voz). Camino rápido: si el fichero está materializado y es legible se copia
+  directo — **no** se llama a `startDownloadingUbiquitousItem` sobre el
+  contenedor de otra app porque lanza un error engañoso ("couldn't be saved in
+  the folder Recordings") aunque el fichero exista. Si está evacuado a iCloud se
+  usa `NSFileCoordinator` (lectura coordinada), que dispara la descarga
+  gestionada por el sistema y da una instantánea legible sin que la app escriba
+  en la biblioteca. Bloquea mientras descarga → `AppState.transcribeVoiceMemo`
+  la ejecuta en un `Task.detached` fuera del hilo principal.
+- **Integración con `AppState`:** `transcribeVoiceMemo(_:)` orquesta
+  (en `Task.detached`) copia/descarga → `runPipeline(input:displayName:)`,
+  pasando el título de la nota como `displayName` para el historial
+  (`sourceAudioPath = nil`, la copia es transitoria). Los fallos de importación viven en
+  `AppState.voiceMemoImportError`, que la ventana pinta.
+- **UI:** `VoiceMemosWindowView` es una `Window(id: "voice-memos")` dedicada con
+  toggle mostrar/ocultar (atajo **⌘I**), estado de apertura en
+  `VoiceMemosWindowState.shared` (mismo patrón que `LogStore`/`HistoryStore`).
+  Puntos de entrada: botón "Importar de Notas de voz…" en `DropZoneView` e item
+  homónimo en el menú de la bandeja.
+- Atajos ocupados tras CU-11: ⌘N/⌘,/⌘C/⌘L/⌘Y/⌘I/⌘Q y ⌥⌘R / ⌥⌘M.
 
 ## 5. Modelo de estado y navegación
 

@@ -115,7 +115,30 @@ Swift side:
   `TheTranscriptorApp.swift` suppresses the default with
   `.commands { CommandGroup(replacing: .newItem) { } }`. If you add more
   `WindowGroup`/`Window` scenes, check for the same collision. Shortcuts already taken:
-  ⌘N/⌘,/⌘C/⌘L/⌘Y.
+  ⌘N/⌘,/⌘C/⌘L/⌘Y/⌘I.
+- **Importar de Notas de voz (CU-11, §4.9):** `VoiceMemosService` lee la biblioteca de la
+  app Notas de voz de macOS en `~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/`
+  (`.m4a` + `CloudRecordings.db` SQLite, leído vía `import SQLite3` sin dependencias; fallback a
+  listar `.m4a` si el esquema cambia). Con sandbox desactivado no hacen falta entitlements.
+  Trampas: (1) **nunca** se transcribe el original — `copyForTranscription` copia a un temporal,
+  porque la pipeline borra su `--input` si "Borrar audio" está activo y eso jamás debe tocar la
+  biblioteca del usuario; (2) **no** llames a `startDownloadingUbiquitousItem` sobre un fichero
+  ya materializado del contenedor de otra app: lanza un error engañoso ("couldn't be saved in the
+  folder Recordings") aunque exista y sea legible — nos mordió. El camino rápido copia directo si
+  es legible; solo para notas evacuadas a iCloud se usa `NSFileCoordinator` (lectura coordinada)
+  que dispara la descarga del sistema sin que la app escriba en la biblioteca.
+  `AppState.transcribeVoiceMemo` corre la copia en `Task.detached` (bloquea si descarga) →
+  `runPipeline(input:displayName:)` (título de la nota como origen del historial,
+  `sourceAudioPath=nil`). Ventana `Window(id: "voice-memos")` (⌘I) con
+  `VoiceMemosWindowState.shared.isWindowOpen`, mismo patrón que log/historial.
+- **Notas de voz está protegido por TCC:** aunque el sandbox esté desactivado, macOS bloquea
+  la lectura del contenedor de grupo de Notas de voz para cualquier app que no sea Notas de
+  voz. Sin **Acceso a disco completo**, `contentsOfDirectory` y abrir `CloudRecordings.db`
+  fallan con `NSFileReadNoPermissionError` (EPERM/EACCES) → el fichero/carpeta existe pero se
+  ve "vacío". Nos mordió: la lista salía "No hay notas de voz" aunque había 104 KB de BD y
+  grabaciones. `loadLibrary` lo detecta y devuelve `.accessDenied` (no `.empty`), y la ventana
+  ofrece un botón a Ajustes → Privacidad → Acceso a disco completo. **FDA exige reiniciar la
+  app.** La BD se abre con URI `?immutable=1` (solo lectura, sin `-wal`/`-shm`).
 - GUI apps don't inherit the shell PATH: extend the child process env with
   `/opt/homebrew/bin:/usr/local/bin`, and detect python/ffmpeg via `/bin/zsh -lc` (§4.4).
 - Requirement checks (ffmpeg, python) run with a 10 s timeout; the **packages** check

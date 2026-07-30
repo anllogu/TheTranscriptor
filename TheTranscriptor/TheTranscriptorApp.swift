@@ -24,6 +24,7 @@ struct TheTranscriptorApp: App {
             CommandGroup(replacing: .newItem) { }
             LogWindowCommands()
             HistoryWindowCommands()
+            VoiceMemosWindowCommands()
         }
 
         MenuBarExtra {
@@ -44,6 +45,12 @@ struct TheTranscriptorApp: App {
             HistoryWindowView()
         }
         .defaultSize(width: 720, height: 480)
+
+        Window("Notas de voz", id: "voice-memos") {
+            VoiceMemosWindowView()
+                .environment(appState)
+        }
+        .defaultSize(width: 560, height: 460)
 
         Settings {
             SettingsView()
@@ -86,6 +93,25 @@ private struct HistoryWindowCommands: Commands {
                 }
             }
             .keyboardShortcut("y", modifiers: .command)
+        }
+    }
+}
+
+private struct VoiceMemosWindowCommands: Commands {
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var windowState = VoiceMemosWindowState.shared
+
+    var body: some Commands {
+        CommandGroup(after: .toolbar) {
+            Button(windowState.isWindowOpen ? "Ocultar notas de voz" : "Importar de Notas de voz") {
+                if windowState.isWindowOpen {
+                    dismissWindow(id: "voice-memos")
+                } else {
+                    openWindow(id: "voice-memos")
+                }
+            }
+            .keyboardShortcut("i", modifiers: .command)
         }
     }
 }

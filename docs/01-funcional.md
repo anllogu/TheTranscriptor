@@ -180,6 +180,34 @@ sistema.
 **Requiere macOS 14+** (`MenuBarExtra`); las grabaciones de reunión requieren
 macOS 14.4+ como CU-09.
 
+### CU-11 · Importar desde la app Notas de voz
+1. Desde la interfaz inicial (botón "Importar de Notas de voz…", atajo ⌘I) o
+   desde el menú de la bandeja ("Importar de Notas de voz…") se abre una
+   **ventana dedicada** que explora la biblioteca local de la app **Notas de
+   voz** de macOS.
+2. Cada nota se lista con su **título, fecha y duración** reales cuando se
+   pueden leer de la base de datos de Notas de voz; si no, se listan los
+   archivos `.m4a` con el nombre de fichero y su fecha de creación.
+3. Las notas guardadas en **iCloud** que aún no están descargadas se marcan con
+   un icono de iCloud; al transcribir se **descargan automáticamente** antes de
+   procesarlas.
+4. Al elegir una nota se **transcribe de inmediato** con los ajustes vigentes
+   (modelo/idioma), igual que arrastrar un archivo, y se abre la ventana
+   principal para ver el progreso. La transcripción se guarda en el historial
+   con el título de la nota como nombre de origen.
+5. La biblioteca de Notas de voz **nunca se modifica**: se transcribe una copia
+   temporal, de modo que "Borrar audio automáticamente" jamás afecta a las
+   grabaciones originales del usuario.
+6. Si el contenedor de Notas de voz no existe (nunca se abrió la app en este
+   Mac) o está vacío, se muestra un mensaje explicativo en la ventana.
+7. macOS protege las grabaciones de Notas de voz (TCC): la primera vez la app
+   mostrará "necesita permiso" con un botón que abre **Ajustes del Sistema →
+   Privacidad y seguridad → Acceso a disco completo**. Tras concederlo hay que
+   **reiniciar The Transcriptor**.
+
+**Requiere macOS 14+.** No hay peticiones de red desde la app: la descarga
+desde iCloud, si procede, la realiza el sistema, no The Transcriptor.
+
 ## 4. Requisitos no funcionales
 
 - **Privacidad:** cero peticiones de red desde la propia app; la única red la

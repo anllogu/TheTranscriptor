@@ -97,6 +97,20 @@ Paralelizable entre agentes: 2.1 ∥ 2.2 ∥ 2.3.
 
 ---
 
+## Fase 7 — Importar desde Notas de voz (CU-11)
+
+> Funcionalidad añadida tras las Fases 0–6. No toca el contrato del script
+> Python (§3): reutiliza `runPipeline`. Ver `01-funcional.md` CU-11 y
+> `02-diseno-tecnico.md §4.9`.
+
+| Tarea | Descripción | Aceptación |
+|---|---|---|
+| 7.1 | `VoiceMemo` + `VoiceMemosService`: localizar el contenedor de Notas de voz, leer `CloudRecordings.db` (SQLite) con fallback a listar `.m4a`; estados ok/empty/unavailable; descarga iCloud (`ensureDownloaded`) y copia temporal (`copyForTranscription`) | Tests unitarios en verde: parseo de BD + conversión de fecha Core Data, fallback por carpeta, empty/unavailable, y copia que no toca el original |
+| 7.2 | `VoiceMemosWindowView` (`Window(id: "voice-memos")`, ⌘I) con lista título/fecha/duración, badge iCloud, botón Transcribir y estados vacío/no disponible | La ventana lista notas reales; elegir una descarga (si iCloud) y transcribe con los ajustes vigentes |
+| 7.3 | Puntos de entrada: botón "Importar de Notas de voz…" en `DropZoneView` e item homónimo en el menú de la bandeja | Ambos abren la ventana; la transcripción resultante aparece en el historial con el título de la nota |
+
+---
+
 ## Resumen y reglas de trabajo con agentes
 
 - **Duración estimada:** 6–9 días de agente efectivos. Ruta crítica: 0 → 1 → 2.1 → 3.

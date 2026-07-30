@@ -49,6 +49,7 @@ struct MenuBarContentView: View {
         Divider()
 
         Button("Transcribir archivo…") { pickFileAndTranscribe() }
+        Button("Importar de Notas de voz…") { showWindow(id: "voice-memos") }
 
         Divider()
         commonItems

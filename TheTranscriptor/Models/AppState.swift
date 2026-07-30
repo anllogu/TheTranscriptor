@@ -39,10 +39,16 @@ final class AppState {
     private let keychainService: KeychainService
     private let requirementsChecker: RequirementsChecker
     private let historyStore: HistoryStore
+    let voiceMemosService: VoiceMemosService
     private var pipelineTask: Task<Void, Never>?
     private var currentInput: URL?
     private var currentModel: WhisperModel?
     private var currentIsMeeting = false
+    private var currentDisplayName: String?
+
+    /// Error al importar una nota de voz (descarga iCloud / copia). Se pinta en
+    /// la ventana de Notas de voz.
+    var voiceMemoImportError: String?
 
     init(
         settings: SettingsStore = SettingsStore(),
@@ -50,6 +56,7 @@ final class AppState {
         keychainService: KeychainService = KeychainService(),
         requirementsChecker: RequirementsChecker = RequirementsChecker(),
         historyStore: HistoryStore = .shared,
+        voiceMemosService: VoiceMemosService = VoiceMemosService(),
         recorder: AudioRecorderService = AudioRecorderService(),
         meetingRecorder: MeetingRecorderService? = nil
     ) {
@@ -58,6 +65,7 @@ final class AppState {
         self.keychainService = keychainService
         self.requirementsChecker = requirementsChecker
         self.historyStore = historyStore
+        self.voiceMemosService = voiceMemosService
         self.recorder = recorder
         // Comparte el mismo AudioRecorderService para no crear un segundo
         // AVAudioEngine en el arranque (los modos micro/reunión no son
@@ -218,7 +226,7 @@ final class AppState {
 
     // MARK: - Pipeline
 
-    func runPipeline(input: URL) {
+    func runPipeline(input: URL, displayName: String? = nil) {
         guard let scriptPath = bundledScriptURL() else {
             phase = .error(PipelineError(message: "No se encontró el script Python embebido.", stderrTail: []))
             return
@@ -237,6 +245,7 @@ final class AppState {
         currentInput = input
         currentModel = model
         currentIsMeeting = false
+        currentDisplayName = displayName
         phase = .processing(.converting, progress: nil, downloading: false)
 
         pipelineTask?.cancel()
@@ -245,6 +254,25 @@ final class AppState {
             for await event in stream {
                 await handle(event: event)
             }
+        }
+    }
+
+    /// Importa una nota de voz de la app Notas de voz y la transcribe: la
+    /// descarga de iCloud si hace falta, la copia a un temporal (nunca se toca
+    /// la biblioteca del usuario) y lanza la pipeline con el título de la nota
+    /// como nombre de origen del historial.
+    @MainActor
+    func transcribeVoiceMemo(_ memo: VoiceMemo) async {
+        voiceMemoImportError = nil
+        do {
+            // La copia puede bloquear si la nota está en iCloud (la descarga es
+            // síncrona vía coordinación de ficheros) → fuera del hilo principal.
+            let copy = try await Task.detached(priority: .userInitiated) {
+                try VoiceMemosService().copyForTranscription(memo)
+            }.value
+            runPipeline(input: copy, displayName: memo.title)
+        } catch {
+            voiceMemoImportError = error.localizedDescription
         }
     }
 
@@ -267,6 +295,7 @@ final class AppState {
         currentInput = result.micURL
         currentModel = model
         currentIsMeeting = true
+        currentDisplayName = nil
         phase = .processing(.converting, progress: nil, downloading: false)
 
         pipelineTask?.cancel()
@@ -335,8 +364,8 @@ final class AppState {
             let entry = HistoryEntry(
                 sourceFileName: currentIsMeeting
                     ? "Reunión"
-                    : (currentInput?.lastPathComponent ?? "audio"),
-                sourceAudioPath: currentIsMeeting ? nil : currentInput?.path,
+                    : (currentDisplayName ?? currentInput?.lastPathComponent ?? "audio"),
+                sourceAudioPath: (currentIsMeeting || currentDisplayName != nil) ? nil : currentInput?.path,
                 whisperModel: (currentModel ?? settings.getWhisperModel()).rawValue,
                 transcript: transcript
             )

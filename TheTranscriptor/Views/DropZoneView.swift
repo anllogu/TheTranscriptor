@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct DropZoneView: View {
     @Environment(AppState.self) private var appState
+    @Environment(\.openWindow) private var openWindow
 
     private let allowedTypes: [UTType] = [.mpeg4Audio, .mpeg4Movie, .quickTimeMovie, .wav]
     private let allowedExtensions: Set<String> = ["m4a", "mp4", "mov", "wav"]
@@ -73,6 +74,14 @@ struct DropZoneView: View {
                     Label("Grabar reunión (micro + sistema)", systemImage: "person.wave.2.fill")
                 }
                 .buttonStyle(.bordered)
+
+                Button {
+                    openWindow(id: "voice-memos")
+                } label: {
+                    Label("Importar de Notas de voz…", systemImage: "waveform.badge.mic")
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut("i", modifiers: .command)
 
                 Text("Consejo: en reunión, usa cascos para evitar que el audio del sistema se cuele por el micrófono.")
                     .font(.caption)
