@@ -63,12 +63,23 @@ python3 transcriptor_local.py \
     --input <ruta_audio> \
     --output-dir <dir_resultados> \
     --model <tiny|base|small|medium|large-v3> \
+    [--language <auto|es|en>] \  # idioma de entrada; auto (por defecto) = autodetectar
     --json \                 # además del .txt, emite result.json
     [--keep-audio]           # NO borrar el original (interruptor desactivado)
 ```
 
 Entorno del proceso: `HF_TOKEN=<token>` (si existe), `PATH` ampliado con
 `/opt/homebrew/bin:/usr/local/bin` (las apps GUI no heredan el PATH del shell).
+
+`--language` es opcional. Su valor por defecto es `auto`, que deja que
+faster-whisper autodetecte el idioma (comportamiento histórico). Cuando el
+usuario fuerza un idioma en la interfaz (Ajustes o el selector rápido de la
+pantalla principal), la app añade `--language <código ISO>` (p. ej. `es`,
+`en`), lo que se pasa a `whisper_model.transcribe(..., language=...)` y mejora
+la exactitud cuando la autodetección se equivoca (p. ej. un audio en español
+detectado como euskera). En modo dos pistas (§3.4) el idioma se aplica a
+ambas pistas. El valor seleccionado se persiste
+(`SettingsStore.transcriptionLanguage`) y se recuerda entre ejecuciones.
 
 > **⚠️ Suposición a validar:** no dispongo del script real; si su CLI actual
 > difiere, se añade en la Fase 1 una capa de argumentos compatible
@@ -125,7 +136,7 @@ python3 transcriptor_local.py \
     --input-mic <mic.wav> --input-system <system.wav> \
     [--mic-offset <seg>] [--system-offset <seg>] \
     --output-dir <dir_resultados> \
-    --model <...> --json [--keep-audio]
+    --model <...> [--language <auto|es|en>] --json [--keep-audio]
 ```
 
 - La pista de **micrófono** se transcribe y se etiqueta ENTERA como
@@ -213,7 +224,8 @@ Resultado: `[RequirementCheck]` con `.ok / .missing(instrucción)` que
 
 ### 4.5 `SettingsStore`
 
-`@AppStorage`-backed: `whisperModel` (String raw), `deleteAudioAfter`
+`@AppStorage`-backed: `whisperModel` (String raw), `transcriptionLanguage`
+(String raw, default `auto`; ver §3.1), `deleteAudioAfter`
 (Bool, default `false` — el original se conserva salvo que el usuario active
 el borrado explícitamente), `pythonPath` (String), `historyRetentionDays`
 (Int, default `0` = sin límite; ver §4.6). El token **no** pasa por aquí.

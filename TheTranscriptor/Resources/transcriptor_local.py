@@ -12,6 +12,7 @@ Invocación (modo una pista):
         --input <ruta_audio> \
         --output-dir <dir_resultados> \
         --model <tiny|base|small|medium|large-v3> \
+        [--language <auto|es|en>] \
         --json \
         [--keep-audio]
 
@@ -21,7 +22,7 @@ Invocación (modo dos pistas — grabación de reunión, §3.4):
         --input-mic <mic.wav> --input-system <system.wav> \
         [--mic-offset <seg>] [--system-offset <seg>] \
         --output-dir <dir_resultados> \
-        --model <...> --json [--keep-audio]
+        --model <...> [--language <auto|es|en>] --json [--keep-audio]
 
     En modo dos pistas la pista de micrófono se transcribe y se etiqueta ENTERA
     como SPEAKER_00 (voz local = "Yo", sin diarización), y la pista del sistema
@@ -66,6 +67,12 @@ import traceback
 import uuid
 
 MODEL_CHOICES = ["tiny", "base", "small", "medium", "large-v3"]
+
+# Códigos de idioma admitidos por --language. "auto" (o el argumento ausente)
+# deja que faster-whisper autodetecte el idioma; cualquier otro valor lo fuerza,
+# lo que mejora la exactitud cuando la autodetección se equivoca (p. ej. audio en
+# español detectado como euskera). Ver contrato §3.
+LANGUAGE_CHOICES = ["auto", "es", "en"]
 
 
 def emit(line: str) -> None:
@@ -137,6 +144,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Modelo whisper a usar",
     )
     parser.add_argument(
+        "--language",
+        required=False,
+        default="auto",
+        choices=LANGUAGE_CHOICES,
+        help=(
+            "Idioma de entrada. 'auto' (por defecto) autodetecta; un código "
+            "ISO (es, en) lo fuerza para mejorar la exactitud."
+        ),
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         dest="emit_json",
@@ -182,8 +199,13 @@ def convert_to_wav(input_path: str, work_dir: str) -> str:
     return out_path
 
 
-def transcribe(wav_path: str, model_name: str) -> tuple[str, float, list[dict]]:
-    """Transcribe con faster-whisper. Devuelve (idioma, duración, segmentos)."""
+def transcribe(
+    wav_path: str, model_name: str, language: str | None = None
+) -> tuple[str, float, list[dict]]:
+    """Transcribe con faster-whisper. Devuelve (idioma, duración, segmentos).
+
+    Si `language` es None o "auto", faster-whisper autodetecta el idioma; si es
+    un código ISO (p. ej. "es"), lo fuerza para mejorar la exactitud."""
     emit_phase("TRANSCRIBING")
 
     # faster-whisper descarga el modelo la primera vez que se instancia;
@@ -197,7 +219,10 @@ def transcribe(wav_path: str, model_name: str) -> tuple[str, float, list[dict]]:
 
     whisper_model = WhisperModel(model_name, device="auto", compute_type="auto")
 
-    segments_iter, info = whisper_model.transcribe(wav_path, beam_size=5)
+    forced_language = language if language and language != "auto" else None
+    segments_iter, info = whisper_model.transcribe(
+        wav_path, beam_size=5, language=forced_language
+    )
 
     duration = float(info.duration) if info.duration else 0.0
     language = info.language or "es"
@@ -417,7 +442,7 @@ def run_dual_track(args: argparse.Namespace, hf_token: str | None) -> str:
     # --- Pista de micrófono: transcripción sin diarización, todo SPEAKER_00 ---
     mic_wav = convert_to_wav(mic_path, output_dir)
     try:
-        mic_language, mic_duration, mic_segments = transcribe(mic_wav, args.model)
+        mic_language, mic_duration, mic_segments = transcribe(mic_wav, args.model, args.language)
     finally:
         if os.path.exists(mic_wav):
             try:
@@ -431,7 +456,7 @@ def run_dual_track(args: argparse.Namespace, hf_token: str | None) -> str:
     # --- Pista del sistema: transcripción + diarización pyannote ---
     system_wav = convert_to_wav(system_path, output_dir)
     try:
-        system_language, system_duration, system_whisper = transcribe(system_wav, args.model)
+        system_language, system_duration, system_whisper = transcribe(system_wav, args.model, args.language)
         system_turns = diarize(system_wav, hf_token)
     finally:
         if os.path.exists(system_wav):
@@ -524,7 +549,7 @@ def main(argv: list[str]) -> int:
     try:
         wav_path = convert_to_wav(input_path, output_dir)
 
-        language, duration, whisper_segments = transcribe(wav_path, args.model)
+        language, duration, whisper_segments = transcribe(wav_path, args.model, args.language)
 
         diarization_turns = diarize(wav_path, hf_token)
 

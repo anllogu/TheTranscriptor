@@ -52,11 +52,12 @@ final class PythonPipelineServiceTests: XCTestCase {
         return repoRoot.appendingPathComponent("Tests/Fixtures/fake_pipeline.py")
     }
 
-    private func makeSettings(slow: Bool = false, keepAudio: Bool = false) -> PipelineSettings {
+    private func makeSettings(slow: Bool = false, keepAudio: Bool = false, language: TranscriptionLanguage = .auto) -> PipelineSettings {
         PipelineSettings(
             pythonPath: systemPython3(),
             scriptPath: fixtureScriptURL(),
             model: .small,
+            language: language,
             keepAudio: keepAudio,
             hfToken: nil,
             extraArguments: slow ? ["--slow"] : []
@@ -95,6 +96,27 @@ final class PythonPipelineServiceTests: XCTestCase {
         XCTAssertEqual(transcript.language, "es")
         XCTAssertEqual(transcript.segments.count, 2)
         XCTAssertEqual(transcript.segments.first?.speaker, "SPEAKER_00")
+    }
+
+    func testForcedLanguageIsForwardedToScript() async throws {
+        // Con idioma forzado (.english), el servicio añade `--language en` a los
+        // argumentos; el fixture refleja ese código en result.json. Con .auto no
+        // se añade el argumento y el fixture usa su valor por defecto ("es"),
+        // demostrando que la selección se propaga correctamente al script.
+        let settings = makeSettings(language: .english)
+        var events: [PythonPipelineService.Event] = []
+
+        for await event in service.run(input: inputFile, settings: settings) {
+            events.append(event)
+        }
+
+        guard case .done(let resultURL) = events.last else {
+            return XCTFail("Expected last event to be .done, got: \(events)")
+        }
+
+        let data = try Data(contentsOf: resultURL)
+        let transcript = try JSONDecoder().decode(Transcript.self, from: data)
+        XCTAssertEqual(transcript.language, "en")
     }
 
     func testDualTrackRunProducesResultAndCleansBothInputs() async throws {

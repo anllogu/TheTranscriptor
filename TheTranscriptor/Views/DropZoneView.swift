@@ -48,6 +48,14 @@ struct DropZoneView: View {
             .padding(.horizontal, 40)
 
             VStack(spacing: 12) {
+                Picker("Idioma de entrada", selection: languageBinding) {
+                    ForEach(TranscriptionLanguage.allCases, id: \.self) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+
                 HStack(spacing: 16) {
                     Button("Elegir archivo…") {
                         showImporter = true
@@ -100,5 +108,12 @@ struct DropZoneView: View {
         rejectedMessage = nil
         appState.runPipeline(input: url)
         return true
+    }
+
+    private var languageBinding: Binding<TranscriptionLanguage> {
+        Binding(
+            get: { appState.settings.getTranscriptionLanguage() },
+            set: { appState.settings.setTranscriptionLanguage($0) }
+        )
     }
 }

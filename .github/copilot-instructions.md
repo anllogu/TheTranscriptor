@@ -55,7 +55,8 @@ The app never does ML itself — it launches the embedded Python script with `Pr
 talks to it over a line protocol. **The script contract (§3 of the technical doc) is the
 interface everything else depends on:**
 
-- **App → script:** CLI args `--input --output-dir --model --json [--keep-audio]`. The HF
+- **App → script:** CLI args `--input --output-dir --model --json [--language <auto|es|en>]
+  [--keep-audio]`. The HF
   token goes via the `HF_TOKEN` env var, **never** as an argument (visible in `ps`), never
   in UserDefaults or logs — Keychain only (`KeychainService`).
 - **Script → app:** stdout lines `@@PHASE:…`, `@@PROGRESS:n`, `@@INFO:downloading_models`,

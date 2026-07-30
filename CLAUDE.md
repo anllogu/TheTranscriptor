@@ -49,7 +49,7 @@ Every task must end with a green build (and tests where applicable); acceptance 
 
 The app never does ML itself — it launches the embedded Python script with `Process` and talks to it over a line protocol. **The script contract (§3 of the technical doc) is the interface everything else depends on:**
 
-- **App → script:** CLI args `--input --output-dir --model --json [--keep-audio]`. The HF token goes via the `HF_TOKEN` env var, **never** as an argument (visible in `ps`), never in UserDefaults or logs — Keychain only (`KeychainService`).
+- **App → script:** CLI args `--input --output-dir --model --json [--language <auto|es|en>] [--keep-audio]`. The HF token goes via the `HF_TOKEN` env var, **never** as an argument (visible in `ps`), never in UserDefaults or logs — Keychain only (`KeychainService`).
 - **Script → app:** stdout lines `@@PHASE:…`, `@@PROGRESS:n`, `@@INFO:downloading_models`, `@@DONE:<path>`, `@@ERROR:<msg>` (with `flush=True`). Lines without `@@` are ignored (library noise). Typed result in `result.json` (§3.3); stderr is buffered for the error screen.
 - The script ships in `TheTranscriptor/Resources/transcriptor_local.py` and is copied to Application Support on first launch (bundle is read-only); it re-copies when the hash changes.
 

@@ -115,6 +115,23 @@ final class ModelsTests: XCTestCase {
         XCTAssertTrue(WhisperModel.largeV3.displayName.contains("máxima calidad"))
     }
 
+    func testTranscriptionLanguageRawValue() {
+        XCTAssertEqual(TranscriptionLanguage.auto.rawValue, "auto")
+        XCTAssertEqual(TranscriptionLanguage.spanish.rawValue, "es")
+        XCTAssertEqual(TranscriptionLanguage.english.rawValue, "en")
+    }
+
+    func testTranscriptionLanguageInit() {
+        XCTAssertEqual(TranscriptionLanguage(rawValue: "auto"), .auto)
+        XCTAssertEqual(TranscriptionLanguage(rawValue: "es"), .spanish)
+        XCTAssertEqual(TranscriptionLanguage(rawValue: "en"), .english)
+        XCTAssertNil(TranscriptionLanguage(rawValue: "xx"))
+    }
+
+    func testTranscriptionLanguageAllCases() {
+        XCTAssertEqual(TranscriptionLanguage.allCases, [.auto, .spanish, .english])
+    }
+
     func testRequirementCheckOk() {
         let check = RequirementCheck.ffmpeg()
         XCTAssertTrue(check.status.isOk)

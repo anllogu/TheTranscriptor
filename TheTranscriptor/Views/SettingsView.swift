@@ -19,6 +19,12 @@ struct SettingsView: View {
                     }
                 }
 
+                Picker("Idioma de entrada", selection: transcriptionLanguageBinding) {
+                    ForEach(TranscriptionLanguage.allCases, id: \.self) { language in
+                        Text(language.displayName).tag(language)
+                    }
+                }
+
                 Toggle("Borrar audio original tras procesar", isOn: deleteAudioBinding)
             }
 
@@ -79,6 +85,13 @@ struct SettingsView: View {
         Binding(
             get: { appState.settings.getWhisperModel() },
             set: { appState.settings.setWhisperModel($0) }
+        )
+    }
+
+    private var transcriptionLanguageBinding: Binding<TranscriptionLanguage> {
+        Binding(
+            get: { appState.settings.getTranscriptionLanguage() },
+            set: { appState.settings.setTranscriptionLanguage($0) }
         )
     }
 

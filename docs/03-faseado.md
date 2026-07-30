@@ -29,6 +29,14 @@ explícitos. Referencias: `01-funcional.md` (CU-xx) y `02-diseno-tecnico.md` (§
 | 1.4 | Hacer opcional el borrado del original (`--keep-audio`) | El archivo sobrevive con el flag |
 | 1.5 | Probar manualmente con: nota de voz `.m4a`, `.mp4` de Zoom, `.wav`; guardar los audios como fixtures | 3 ejecuciones correctas documentadas |
 
+> **Extensión posterior del contrato (idioma de entrada):** se añadió el
+> argumento opcional `--language <auto|es|en>` (§3.1) para permitir forzar el
+> idioma de transcripción y mejorar la exactitud cuando la autodetección de
+> faster-whisper falla (p. ej. español detectado como euskera). `auto` (por
+> defecto) mantiene el comportamiento histórico. Cambio dentro del ámbito de
+> Fase 1 (contrato), con `02-diseno-tecnico.md §3`, `01-funcional.md` CU-05 y
+> los ficheros de instrucciones actualizados en el mismo commit.
+
 ## Fase 2 — Núcleo Swift sin UI (1–2 días)
 
 **Objetivo:** servicios probados por test/CLI antes de conectar vistas.

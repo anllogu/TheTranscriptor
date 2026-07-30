@@ -28,6 +28,7 @@ def main() -> int:
     parser.add_argument("--model", required=True)
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--keep-audio", action="store_true")
+    parser.add_argument("--language", required=False, default="auto")
     parser.add_argument(
         "--slow",
         action="store_true",
@@ -59,8 +60,12 @@ def main() -> int:
     emit("@@PHASE:MERGING")
     time.sleep(0.05)
 
+    # Reflejamos el idioma recibido para que los tests puedan verificar el
+    # forwarding de --language; "auto" mapea a "es" (comportamiento por defecto).
+    reflected_language = args.language if args.language != "auto" else "es"
+
     result = {
-        "language": "es",
+        "language": reflected_language,
         "duration": 12.5,
         "segments": [
             {"start": 0.0, "end": 4.2, "speaker": "SPEAKER_00", "text": "Hola, esto es una prueba."},

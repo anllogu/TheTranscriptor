@@ -14,6 +14,7 @@ struct PipelineSettings {
     var pythonPath: String
     var scriptPath: URL
     var model: WhisperModel
+    var language: TranscriptionLanguage
     var keepAudio: Bool
     var hfToken: String?
     /// Extra CLI arguments appended after the standard contract arguments.
@@ -25,6 +26,7 @@ struct PipelineSettings {
         pythonPath: String,
         scriptPath: URL,
         model: WhisperModel,
+        language: TranscriptionLanguage = .auto,
         keepAudio: Bool = false,
         hfToken: String? = nil,
         extraArguments: [String] = []
@@ -32,6 +34,7 @@ struct PipelineSettings {
         self.pythonPath = pythonPath
         self.scriptPath = scriptPath
         self.model = model
+        self.language = language
         self.keepAudio = keepAudio
         self.hfToken = hfToken
         self.extraArguments = extraArguments
@@ -230,6 +233,9 @@ final class PythonPipelineService {
             "--model", settings.model.rawValue,
             "--json"
         ]
+        if settings.language != .auto {
+            arguments.append(contentsOf: ["--language", settings.language.rawValue])
+        }
         switch input {
         case .single(let url):
             arguments.append(contentsOf: ["--input", url.path])

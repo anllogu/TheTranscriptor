@@ -71,6 +71,7 @@ Ajustes del Sistema → Privacidad → Micrófono.
 | Ajuste | Tipo | Valor por defecto | Almacenamiento |
 |---|---|---|---|
 | Modelo Whisper | selector: tiny/base/small/medium/large-v3 | `small` | UserDefaults |
+| Idioma de entrada | selector: Automático/Español/Inglés | `Automático` (autodetectar) | UserDefaults |
 | Token Hugging Face | campo seguro | vacío | **Keychain** |
 | Borrar audio al terminar | interruptor | **desactivado** | UserDefaults |
 | Intérprete de Python | ruta + botón "Autodetectar" y "Examinar…" | autodetectado | UserDefaults |
@@ -80,6 +81,12 @@ Ajustes del Sistema → Privacidad → Micrófono.
   argumentos son visibles en `ps`).
 - Junto al selector de modelo, texto orientativo de tamaño/velocidad
   (p. ej. "large-v3: máxima calidad, ~3 GB, lento sin GPU").
+- El idioma de entrada se ofrece además como **selector rápido en la pantalla
+  principal** (drop zone), bindeado al mismo valor persistido, para poder
+  ajustarlo justo antes de transcribir. `Automático` autodetecta (histórico);
+  forzar un idioma mejora la exactitud cuando la autodetección se equivoca
+  (p. ej. español detectado como euskera). Se recuerda el último idioma
+  elegido.
 
 ### CU-06 · Comprobación de requisitos (primer arranque y bajo demanda)
 Al primer arranque (y desde Ajustes → "Comprobar requisitos") la app verifica:

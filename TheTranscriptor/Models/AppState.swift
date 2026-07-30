@@ -229,6 +229,7 @@ final class AppState {
             pythonPath: resolvedPythonPath(),
             scriptPath: scriptPath,
             model: model,
+            language: settings.getTranscriptionLanguage(),
             keepAudio: !settings.deleteAudioAfter,
             hfToken: keychainService.token()
         )
@@ -258,6 +259,7 @@ final class AppState {
             pythonPath: resolvedPythonPath(),
             scriptPath: scriptPath,
             model: model,
+            language: settings.getTranscriptionLanguage(),
             keepAudio: !settings.deleteAudioAfter,
             hfToken: keychainService.token()
         )
