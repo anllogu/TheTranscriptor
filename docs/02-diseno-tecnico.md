@@ -158,6 +158,17 @@ python3 transcriptor_local.py \
   `SPEAKER_02`, … por orden de aparición para no colisionar con el micro.
 - A cada pista se le suma su offset (`--mic-offset`/`--system-offset`, en
   segundos, relativos al inicio común de la grabación) antes de fusionar.
+- **Fidelidad de la línea de tiempo:** ambos WAV deben reflejar el silencio
+  transcurrido para que sus timestamps casen. El WAV del micro
+  (`AudioRecorderService`, `AVAudioEngine`) ya conserva el silencio inicial
+  porque el tap entrega buffers de forma continua desde el arranque. El WAV del
+  sistema (`SystemAudioRecorderService`, *process tap*) **no** recibe buffers
+  durante el silencio, así que se **rellena con silencio** el hueco entre la
+  posición esperada (según el reloj de pared desde el arranque) y lo realmente
+  escrito, tanto el silencio inicial como huecos intermedios. Sin esto, una
+  pista muda hasta el segundo 30 empezaba su transcripción en el segundo 0 y
+  quedaba descuadrada respecto a la otra. Los offsets solo compensan el pequeño
+  desfase entre las dos llamadas a `start()`.
 - Ambas listas de segmentos se **fusionan ordenadas por `start`** en un único
   `result.json` con el mismo formato de §3.3. El resultado es una sola
   transcripción/entrada de historial, idéntica a cualquier otra.
@@ -305,11 +316,27 @@ script (§3.4).
   `AudioRecorderService`) y calcula el nivel RMS. `muteBehavior = .unmuted`
   para que el usuario siga oyendo la reunión. Vuelca diagnóstico (dispositivo
   de salida, formato del tap, frames escritos) a `LogStore` (⌘L).
+  **Relleno de silencio (línea de tiempo fiel):** el *process tap* no entrega
+  buffers durante el silencio, así que el WAV se acortaría y descuadraría frente
+  al del micro. Antes de escribir cada buffer se rellena con silencio el hueco
+  entre la posición esperada (`Date()` desde el arranque tras `AudioDeviceStart`,
+  guardado en `timelineStartHostTime`) y lo realmente escrito. Un umbral
+  (`silenceGapThresholdSeconds`, 0,25 s) absorbe el jitter de latencia de
+  callback: durante el sonido continuo `framesWritten` avanza al ritmo de las
+  muestras (precisión de audio) y no se rellena; solo se inyecta silencio ante
+  paradas reales del tap (silencio inicial o huecos intermedios, incluido el
+  hueco de un cambio de dispositivo, ya que `rebuildCapture` preserva el
+  contador y el origen). La lógica se aísla en el helper puro
+  `silenceGapFrames(expectedStartFrames:writtenFrames:thresholdFrames:)`
+  (testeado sin Core Audio).
 - **`MeetingRecorderService`** coordina el micrófono
   (`AudioRecorderService`, **reutilizando la misma instancia** que el modo
   solo-micro para no crear un segundo `AVAudioEngine` en el arranque) y
   `SystemAudioRecorderService`, arrancándolos a la vez y registrando el
-  instante de inicio de cada pista para derivar los offsets de §3.4.
+  instante de inicio de cada pista para derivar los offsets de §3.4 (helper puro
+  `offsets(micStart:systemStart:)`, testeado). Con el relleno de silencio del
+  WAV del sistema, esos offsets solo compensan el pequeño desfase entre las dos
+  llamadas a `start()` (≈ms); el desfase grande por silencio ya no ocurre.
   Devuelve `(micURL, systemURL, micOffset, systemOffset)` a
   `AppState.runMeetingPipeline`. No soporta pausa/reanudación (se graba de
   corrido para no desincronizar las pistas). **Grabar por altavoces provoca

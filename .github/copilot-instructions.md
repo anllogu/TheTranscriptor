@@ -214,6 +214,20 @@ Swift side:
   Friendly names ("Yo"/"Interlocutor N") are injected in Swift
   (`AppState.defaultMeetingSpeakerNames`), never emitted by the script, so `result.json`
   keeps the exact same shape and one history entry is produced.
+- **Silence padding keeps the two meeting tracks aligned (§3.4/§4.7):** the
+  system-audio *process tap* does NOT deliver buffers during silence, so its WAV
+  used to skip leading silence — a track silent until second 30 started its
+  transcript at 0 and drifted out of sync (whisper itself preserves absolute
+  timestamps, verified). `SystemAudioRecorderService` now pads silence before
+  writing each buffer: it fills the gap between the expected position (wall-clock
+  `Date()` since `AudioDeviceStart`, stored in `timelineStartHostTime`) and
+  `framesWritten`. A 0.25 s threshold (`silenceGapThresholdSeconds`) absorbs
+  callback jitter so continuous audio is placed by sample count and only real
+  stalls (leading/intra gaps, incl. device-change via `rebuildCapture`, which
+  preserves the counter+origin) get silence. Pure helper `silenceGapFrames(...)`
+  (+ `MeetingRecorderService.offsets(...)`) are unit-tested. `--mic-offset/
+  --system-offset` now only compensate the ms-level delta between the two
+  `start()` calls. Don't reset `framesWritten`/`timelineStartHostTime` on rebuild.
 - **Don't construct two `AVAudioEngine`s at launch:** `AppState()` is created eagerly
   (`@State private var appState = AppState()`); if its init blocks the main thread the
   XCTest runner hangs with "test runner hung before establishing connection" (no

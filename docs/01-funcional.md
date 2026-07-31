@@ -148,7 +148,10 @@ cuatro requisitos estén en verde, pero nunca falla silenciosamente.
    voces remotas se separan (diarización con pyannote sobre la pista del
    sistema) como "Interlocutor 1", "Interlocutor 2", … El usuario puede
    renombrarlos como en cualquier transcripción. Se guarda **una sola entrada
-   en el historial** (CU-08), igual que el resto.
+   en el historial** (CU-08), igual que el resto. Los tiempos de ambas pistas
+   respetan el silencio (si una pista está muda al principio, su transcripción
+   empieza en el instante real, no en el segundo 0), de modo que micro y sistema
+   quedan sincronizados (detalle técnico en §3.4/§4.7).
 5. Como usa pyannote, requiere el token de Hugging Face (CU-06), igual que la
    transcripción de un archivo.
 

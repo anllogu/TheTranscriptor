@@ -48,6 +48,18 @@ final class SystemAudioRecorderService {
     private var ioProcFired: Bool = false
     private var lastDiagLog: Date = .distantPast
 
+    // Línea de tiempo fiel: instante de reloj de pared del arranque de la
+    // captura. El *process tap* del sistema no entrega buffers durante el
+    // silencio (ni el inicial ni los huecos intermedios), así que su WAV se
+    // acortaría y quedaría descuadrado respecto a la pista del micro. Antes de
+    // escribir cada buffer se rellena con silencio el hueco entre la posición
+    // esperada (según el tiempo transcurrido) y lo realmente escrito, para que
+    // ambas pistas compartan el mismo origen temporal (§3.4/§4.7).
+    private var timelineStartHostTime: Date?
+    // Umbral (en segundos) por debajo del cual NO se rellena: absorbe el jitter
+    // normal de latencia de callback; solo se rellenan silencios reales.
+    private static let silenceGapThresholdSeconds: Double = 0.25
+
     // Serializa la reconstrucción de la captura cuando cambia el dispositivo
     // de salida por defecto durante la grabación.
     private let coreAudioQueue = DispatchQueue(label: "com.allosa.TheTranscriptor.systemaudio")
@@ -91,6 +103,7 @@ final class SystemAudioRecorderService {
             throw RecorderError.startFailed(status)
         }
 
+        timelineStartHostTime = Date()
         outputURL = url
         state = .recording
         ioProcFired = false
@@ -143,6 +156,7 @@ final class SystemAudioRecorderService {
         converter = nil
         state = .idle
         level = 0
+        timelineStartHostTime = nil
         log("captura del sistema detenida (frames escritos: \(framesWritten))")
         return outputURL
     }
@@ -434,9 +448,64 @@ final class SystemAudioRecorderService {
         }
 
         if error == nil, outBuffer.frameLength > 0 {
+            fillSilenceGapIfNeeded(nextBufferOutputFrames: Int64(outBuffer.frameLength))
             try? audioFile.write(from: outBuffer)
             framesWritten += Int64(outBuffer.frameLength)
             logDiagnosticsIfNeeded()
+        }
+    }
+
+    /// Rellena con silencio el hueco entre lo que *debería* haberse escrito
+    /// (según el tiempo transcurrido de reloj de pared) y lo realmente escrito,
+    /// justo antes de volcar el siguiente buffer de datos. Durante el sonido
+    /// continuo `framesWritten` avanza al ritmo de las muestras (precisión de
+    /// audio) y el hueco queda por debajo del umbral → no se rellena; solo se
+    /// inyecta silencio ante paradas reales del *tap* (silencio inicial o huecos
+    /// intermedios), que es donde se perdía la línea de tiempo.
+    private func fillSilenceGapIfNeeded(nextBufferOutputFrames: Int64) {
+        guard let timelineStartHostTime, let outputFormat else { return }
+        let outRate = outputFormat.sampleRate
+        let elapsed = Date().timeIntervalSince(timelineStartHostTime)
+        let expectedStartFrames = Int64((elapsed - Double(nextBufferOutputFrames) / outRate) * outRate)
+        let thresholdFrames = Int64(Self.silenceGapThresholdSeconds * outRate)
+        let gap = Self.silenceGapFrames(
+            expectedStartFrames: expectedStartFrames,
+            writtenFrames: framesWritten,
+            thresholdFrames: thresholdFrames
+        )
+        guard gap > 0 else { return }
+        writeSilence(outputFrames: gap)
+        framesWritten += gap
+        LogStore.shared.append(
+            String(format: "relleno de silencio: %lld frames (%.2fs) para mantener la línea de tiempo",
+                   gap, Double(gap) / outRate),
+            source: "sysaudio"
+        )
+    }
+
+    /// Frames de silencio a insertar: la diferencia entre la posición esperada y
+    /// la escrita, ignorando huecos por debajo del umbral (jitter de callback).
+    /// Función pura para poder testear la lógica sin Core Audio.
+    static func silenceGapFrames(expectedStartFrames: Int64, writtenFrames: Int64, thresholdFrames: Int64) -> Int64 {
+        let gap = expectedStartFrames - writtenFrames
+        return gap >= thresholdFrames ? gap : 0
+    }
+
+    /// Escribe `outputFrames` muestras a cero en el WAV de salida (mono Int16
+    /// intercalado), troceando en bloques para no reservar buffers gigantes.
+    private func writeSilence(outputFrames: Int64) {
+        guard outputFrames > 0, let audioFile, let outputFormat else { return }
+        var remaining = outputFrames
+        let chunk: AVAudioFrameCount = 16_000
+        while remaining > 0 {
+            let n = AVAudioFrameCount(min(Int64(chunk), remaining))
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: n) else { break }
+            buffer.frameLength = n
+            if let channel = buffer.int16ChannelData {
+                memset(channel[0], 0, Int(n) * MemoryLayout<Int16>.size)
+            }
+            try? audioFile.write(from: buffer)
+            remaining -= Int64(n)
         }
     }
 

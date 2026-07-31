@@ -88,10 +88,7 @@ final class MeetingRecorderService {
             return nil
         }
 
-        let reference = min(micStart, systemStart)
-        let micOffset = micStart.timeIntervalSince(reference)
-        let systemOffset = systemStart.timeIntervalSince(reference)
-
+        let (micOffset, systemOffset) = Self.offsets(micStart: micStart, systemStart: systemStart)
         self.micStart = nil
         self.systemStart = nil
 
@@ -100,6 +97,19 @@ final class MeetingRecorderService {
             systemURL: systemURL,
             micOffset: micOffset,
             systemOffset: systemOffset
+        )
+    }
+
+    /// Deriva los *offsets* de cada pista respecto al origen común (el arranque
+    /// más temprano). Ambos WAV son fieles a su propia línea de tiempo desde su
+    /// `start()` (el del sistema rellena el silencio inicial), así que estos
+    /// offsets solo compensan el pequeño desfase entre las dos llamadas a
+    /// `start()`. Función pura para poder testearla sin grabar (§3.4).
+    static func offsets(micStart: Date, systemStart: Date) -> (mic: Double, system: Double) {
+        let reference = min(micStart, systemStart)
+        return (
+            mic: micStart.timeIntervalSince(reference),
+            system: systemStart.timeIntervalSince(reference)
         )
     }
 
