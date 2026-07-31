@@ -1,6 +1,6 @@
 import Foundation
 
-enum PipelinePhase: String, Codable, Equatable {
+enum PipelinePhase: String, Codable, CaseIterable, Equatable {
     case converting = "CONVERTING"
     case transcribing = "TRANSCRIBING"
     case diarizing = "DIARIZING"
@@ -16,6 +16,19 @@ enum PipelinePhase: String, Codable, Equatable {
             return "Diarizando…"
         case .merging:
             return "Uniendo resultados…"
+        }
+    }
+
+    var checklistTitle: String {
+        switch self {
+        case .converting:
+            return "Convertir audio"
+        case .transcribing:
+            return "Transcribir"
+        case .diarizing:
+            return "Diarizar"
+        case .merging:
+            return "Unir resultados"
         }
     }
 }

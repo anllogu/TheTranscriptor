@@ -4,7 +4,7 @@ enum AppPhase {
     case checkingRequirements([RequirementCheck])
     case idle
     case recording
-    case processing(PipelinePhase, progress: Int?, downloading: Bool)
+    case processing(PipelinePhase, progress: Int?, downloading: Bool, action: String?)
     case result(HistoryEntry)
     case error(PipelineError)
 }
@@ -246,7 +246,7 @@ final class AppState {
         currentModel = model
         currentIsMeeting = false
         currentDisplayName = displayName
-        phase = .processing(.converting, progress: nil, downloading: false)
+        phase = .processing(.converting, progress: nil, downloading: false, action: nil)
 
         pipelineTask?.cancel()
         pipelineTask = Task { [pipelineService] in
@@ -296,7 +296,7 @@ final class AppState {
         currentModel = model
         currentIsMeeting = true
         currentDisplayName = nil
-        phase = .processing(.converting, progress: nil, downloading: false)
+        phase = .processing(.converting, progress: nil, downloading: false, action: nil)
 
         pipelineTask?.cancel()
         pipelineTask = Task { [pipelineService] in
@@ -334,18 +334,27 @@ final class AppState {
             // @@PROGRESS from 0); carrying over the previous phase's value
             // made a DIARIZING start show a stale 100% left over from
             // TRANSCRIBING, looking finished/stuck when it had barely begun.
-            if case .processing(_, _, let downloading) = phase {
-                phase = .processing(p, progress: nil, downloading: downloading)
+            if case .processing(_, _, let downloading, _) = phase {
+                phase = .processing(p, progress: nil, downloading: downloading, action: nil)
             } else {
-                phase = .processing(p, progress: nil, downloading: false)
+                phase = .processing(p, progress: nil, downloading: false, action: nil)
             }
         case .progress(let n):
-            if case .processing(let p, _, let downloading) = phase {
-                phase = .processing(p, progress: n, downloading: downloading)
+            if case .processing(let p, _, let downloading, let action) = phase {
+                phase = .processing(p, progress: n, downloading: downloading, action: action)
             }
         case .downloadingModels:
-            if case .processing(let p, let progress, _) = phase {
-                phase = .processing(p, progress: progress, downloading: true)
+            if case .processing(let p, let progress, _, let action) = phase {
+                phase = .processing(p, progress: progress, downloading: true, action: action ?? "Descargando modelos…")
+            }
+        case .diarizingStep(let step):
+            if case .processing(let p, let progress, let downloading, _) = phase {
+                phase = .processing(
+                    p,
+                    progress: progress,
+                    downloading: downloading,
+                    action: Self.diarizingActionText(step)
+                )
             }
         case .done(let resultURL):
             decodeAndShowResult(from: resultURL)
@@ -398,6 +407,20 @@ final class AppState {
             }
         }
         return names
+    }
+
+    private static func diarizingActionText(_ step: String) -> String {
+        switch step.lowercased() {
+        case "segmentation":
+            return "Diarización: segmentando voces…"
+        case "embeddings":
+            return "Diarización: calculando embeddings…"
+        case "clustering":
+            return "Diarización: agrupando hablantes…"
+        default:
+            let cleaned = step.replacingOccurrences(of: "_", with: " ")
+            return "Diarización: \(cleaned)…"
+        }
     }
 
     // MARK: - Helpers

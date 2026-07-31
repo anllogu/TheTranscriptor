@@ -56,6 +56,8 @@ def main() -> int:
 
     emit("@@PHASE:DIARIZING")
     time.sleep(0.05)
+    emit("@@INFO:diarizing_step:segmentation")
+    time.sleep(0.05)
 
     emit("@@PHASE:MERGING")
     time.sleep(0.05)

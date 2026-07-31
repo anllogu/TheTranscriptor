@@ -12,8 +12,8 @@ struct MainView: View {
                 DropZoneView()
             case .recording:
                 RecordingView()
-            case .processing(let phase, let progress, let downloading):
-                ProcessingView(phase: phase, progress: progress, downloading: downloading)
+            case .processing(let phase, let progress, let downloading, let action):
+                ProcessingView(phase: phase, progress: progress, downloading: downloading, currentAction: action)
             case .result(let entry):
                 ResultView(entry: entry)
             case .error(let error):

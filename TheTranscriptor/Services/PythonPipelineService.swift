@@ -118,6 +118,7 @@ final class PythonPipelineService {
         case phase(PipelinePhase)
         case progress(Int)
         case downloadingModels
+        case diarizingStep(String)
         case done(URL)
         case failed(PipelineError)
     }
@@ -329,8 +330,16 @@ final class PythonPipelineService {
                     if let progress = Int(value) {
                         continuation.yield(.progress(progress))
                     }
-                } else if payload.hasPrefix("INFO:downloading_models") {
-                    continuation.yield(.downloadingModels)
+                } else if payload.hasPrefix("INFO:") {
+                    let info = String(payload.dropFirst("INFO:".count))
+                    if info == "downloading_models" {
+                        continuation.yield(.downloadingModels)
+                    } else if info.hasPrefix("diarizing_step:") {
+                        let step = String(info.dropFirst("diarizing_step:".count))
+                        if !step.isEmpty {
+                            continuation.yield(.diarizingStep(step))
+                        }
+                    }
                 } else if payload.hasPrefix("DONE:") {
                     let path = String(payload.dropFirst("DONE:".count))
                     continuation.yield(.done(URL(fileURLWithPath: path)))

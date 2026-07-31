@@ -84,6 +84,7 @@ final class PythonPipelineServiceTests: XCTestCase {
             .progress(50),
             .downloadingModels,
             .phase(.diarizing),
+            .diarizingStep("segmentation"),
             .phase(.merging)
         ])
 
@@ -179,6 +180,19 @@ final class PythonPipelineServiceTests: XCTestCase {
                 XCTFail("Unexpected .failed event from noisy stdout line: \(event)")
             }
         }
+    }
+
+    func testDiarizingStepInfoIsParsed() async throws {
+        let settings = makeSettings()
+        var receivedStep: String?
+
+        for await event in service.run(input: inputFile, settings: settings) {
+            if case .diarizingStep(let step) = event {
+                receivedStep = step
+            }
+        }
+
+        XCTAssertEqual(receivedStep, "segmentation")
     }
 
     func testCancelTerminatesProcessAndCleansWorkDir() async throws {

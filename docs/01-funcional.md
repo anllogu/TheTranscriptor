@@ -44,9 +44,13 @@ Ajustes del Sistema → Privacidad → Micrófono.
 ### CU-03 · Ver progreso del procesamiento
 - La app lee stdout del script en streaming y traduce sus marcas de fase a
   texto de UI: "Convirtiendo audio…", "Transcribiendo…", "Diarizando…",
-  "Uniendo resultados…".
+  "Uniendo resultados…", mostrando además un checklist de pasos
+  (pendiente/en curso/completado).
 - Barra de progreso indeterminada por fase; si el script emite porcentaje,
   se muestra determinada.
+- Si el script emite acciones internas por `@@INFO` (p. ej.
+  `@@INFO:diarizing_step:...`), la UI las muestra como "acción actual" para
+  que el usuario vea que la diarización sigue avanzando.
 - Botón **Cancelar**: termina el proceso Python (SIGTERM, luego SIGKILL a los
   5 s) y limpia temporales.
 - La primera vez que se usan los modelos de pyannote, la fase de diarización

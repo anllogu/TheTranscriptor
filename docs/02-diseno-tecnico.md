@@ -25,7 +25,7 @@ TheTranscriptor/
 │   ├── MainView.swift                # Enrutado por AppState.phase (switch)
 │   ├── DropZoneView.swift            # Drag&drop + fileImporter + botón grabar
 │   ├── RecordingView.swift           # Controles + medidor de nivel + cronómetro
-│   ├── ProcessingView.swift          # Fase actual, progreso, cancelar
+│   ├── ProcessingView.swift          # Fase actual, checklist de pasos, progreso y cancelar
 │   ├── ResultView.swift              # Lista de segmentos, renombrado, exportar
 │   ├── SettingsView.swift            # Scene Settings estándar de macOS
 │   ├── RequirementsView.swift        # Checklist ✓/✗ con instrucciones
@@ -117,6 +117,11 @@ una nueva fase — antes se arrastraba, así que al entrar en `DIARIZING` la UI
 seguía mostrando el `100%` que había dejado `TRANSCRIBING`, pareciendo
 terminado/colgado cuando la diarización acababa de empezar.
 
+Los `@@INFO:diarizing_step:<nombre>` se exponen desde `PythonPipelineService`
+como evento tipado y la UI los muestra como "acción actual" dentro de
+`ProcessingView` para dar trazabilidad de avance interno sin inventar un
+porcentaje global.
+
 Cualquier línea sin `@@` se ignora (logs de las librerías). Esto hace el
 protocolo robusto frente al ruido de faster-whisper/pyannote.
 
@@ -170,7 +175,8 @@ pre-cargan en `Transcript.speakerNames` desde Swift
 ```swift
 @Observable final class PythonPipelineService {
     enum Event { case phase(PipelinePhase), progress(Int),
-                 downloadingModels, done(URL), failed(PipelineError) }
+                 downloadingModels, diarizingStep(String),
+                 done(URL), failed(PipelineError) }
 
     func run(input: URL, settings: PipelineSettings) -> AsyncStream<Event>
     func cancel()
@@ -180,8 +186,10 @@ pre-cargan en `Transcript.speakerNames` desde Swift
 - `Process` con `executableURL` = intérprete configurado; `arguments` según §3.1.
 - `standardOutput`/`standardError` → `Pipe`; lectura incremental con
   `FileHandle.bytes.lines` (AsyncSequence) en una `Task` desatendida.
-- Parser del protocolo `@@` → emite `Event` en el stream; stderr se acumula
-  en un buffer circular (últimas ~200 líneas) para la pantalla de error.
+- Parser del protocolo `@@` → emite `Event` en el stream
+  (`phase/progress/downloadingModels/diarizingStep`) y mantiene ignoradas las
+  líneas sin prefijo reconocido; stderr se acumula en un buffer circular
+  (últimas ~200 líneas) para la pantalla de error.
 - `cancel()`: `terminate()` (SIGTERM); si a los 5 s sigue vivo,
   `kill(pid, SIGKILL)`. `terminationHandler` limpia temporales siempre.
 - El WAV temporal y `output-dir` viven en
