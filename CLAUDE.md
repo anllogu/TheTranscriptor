@@ -81,8 +81,21 @@ Swift side:
   `.commands { CommandGroup(replacing: .newItem) { } }`. If you add more
   `WindowGroup`/`Window` scenes, check for the same collision.
 - GUI apps don't inherit the shell PATH: extend the child process env with `/opt/homebrew/bin:/usr/local/bin`, and detect python/ffmpeg via `/bin/zsh -lc` (§4.4).
-- Requirement checks (ffmpeg, python) run with a 10 s timeout; the **packages**
-  check (`import faster_whisper, pyannote.audio`) uses a separate, longer
+- **Dylibs de ffmpeg duplicadas (`objc[…]: Class AVFFrameReceiver is implemented
+  in both …`):** `faster-whisper` importa **PyAV**, que incrusta su propio ffmpeg
+  en `av/.dylibs/`; `pyannote.audio` arrastra `torchaudio` → **`torchcodec`**,
+  cuyas `libtorchcodec_core*.dylib` enlazan ffmpeg por `@rpath =
+  /opt/homebrew/opt/ffmpeg/lib` → se carga una **segunda** copia de las mismas
+  dylibs (ffmpeg de Homebrew) en el mismo proceso Python y el runtime de ObjC ve
+  clases registradas dos veces. `FFmpegDylibShimService` (§4.10) lo arregla:
+  genera un shim en `Application Support/TheTranscriptor/ffmpeg-shim/` con
+  symlinks de soname mayor (`libavdevice.62.dylib` → el fichero versionado de
+  `av/.dylibs`) y `PythonPipelineService`/`RequirementsChecker` lo inyectan como
+  `DYLD_LIBRARY_PATH`, forzando a torchcodec a reusar las dylibs de PyAV (una
+  sola copia). El shim se regenera en cada arranque (auto-sana si cambia la
+  versión de PyAV) y solo enlaza `libav*`/`libsw*`. **Depende de Hardened Runtime
+  desactivado** — con él, dyld ignora `DYLD_LIBRARY_PATH` y vuelve el aviso. El
+  binario `ffmpeg` (subproceso de conversión) NO es el problema.
   45 s timeout (`RequirementsChecker.packagesTimeout`) because that import
   pulls in torch/torchaudio and can take >10s cold (no `__pycache__` yet,
   e.g. right after a fresh `PythonSetupService` install) — a short timeout

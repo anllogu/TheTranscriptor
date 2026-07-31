@@ -72,7 +72,10 @@ python3 transcriptor_local.py \
 ```
 
 Entorno del proceso: `HF_TOKEN=<token>` (si existe), `PATH` ampliado con
-`/opt/homebrew/bin:/usr/local/bin` (las apps GUI no heredan el PATH del shell).
+`/opt/homebrew/bin:/usr/local/bin` (las apps GUI no heredan el PATH del shell),
+y `DYLD_LIBRARY_PATH` apuntando al *shim* de ffmpeg (`FFmpegDylibShimService`,
+§4.10) para que torchcodec y PyAV compartan una sola copia de las dylibs de
+ffmpeg dentro del proceso.
 
 `--language` es opcional. Su valor por defecto es `auto`, que deja que
 faster-whisper autodetecte el idioma (comportamiento histórico). Cuando el
@@ -414,6 +417,35 @@ Descubre e importa notas de la app **Notas de voz** de macOS (CU-11).
   homónimo en el menú de la bandeja.
 - Atajos ocupados tras CU-11: ⌘N/⌘,/⌘C/⌘L/⌘Y/⌘I/⌘Q y ⌥⌘R / ⌥⌘M.
 
+### 4.10 `FFmpegDylibShimService` (deduplicación de dylibs de ffmpeg)
+
+Evita el aviso `objc[…]: Class AVFFrameReceiver is implemented in both …`
+(y los cuelgues que advierte) que aparece en `stderr` al ejecutar la pipeline.
+
+- **Causa:** dos copias de las dylibs de ffmpeg cargadas en el mismo proceso
+  Python. `faster-whisper` importa **PyAV**, que **incrusta su propio ffmpeg**
+  en `av/.dylibs/` (p. ej. `libavdevice.62.3.102.dylib`). `pyannote.audio`
+  arrastra `torchaudio` → **`torchcodec`**, cuyas `libtorchcodec_core*.dylib`
+  enlazan ffmpeg por `@rpath` = `/opt/homebrew/opt/ffmpeg/lib` → carga una
+  **segunda** copia de las mismas dylibs (ffmpeg de Homebrew) → el runtime de
+  ObjC detecta clases (`AVFFrameReceiver`, `AVFAudioReceiver`) registradas dos
+  veces. El binario `ffmpeg` (subproceso de conversión) **no** es el problema.
+- **Solución:** un directorio *shim* en
+  `Application Support/TheTranscriptor/ffmpeg-shim/` con symlinks de *soname*
+  mayor (`libavdevice.62.dylib` → el fichero versionado de `av/.dylibs`), que se
+  inyecta como `DYLD_LIBRARY_PATH` al lanzar Python (`PythonPipelineService` y el
+  probe de paquetes de `RequirementsChecker`). `DYLD_LIBRARY_PATH` se consulta
+  por nombre de fichero antes que el `@rpath`, así torchcodec resuelve las mismas
+  dylibs que ya cargó PyAV → una sola copia, sin duplicados ObjC.
+- **Robustez:** el shim se **regenera en cada arranque** (auto-sana si cambia la
+  versión de PyAV); solo se crean symlinks para `libav*`/`libsw*` (el resto del
+  contenido de `.dylibs` se ignora). Si el intérprete no tiene PyAV, no hay shim
+  y no se toca `DYLD_LIBRARY_PATH`. La localización de `av/.dylibs` se hace con un
+  probe `python -c "import av; …"` cacheado por intérprete.
+- **Dependencia:** requiere Hardened Runtime **desactivado** (lo está, §6); con
+  hardened runtime dyld ignoraría `DYLD_LIBRARY_PATH` y habría que buscar otra
+  vía (p. ej. re-firmar/renombrar las dylibs de torchcodec).
+
 ## 5. Modelo de estado y navegación
 
 ```swift
@@ -446,7 +478,9 @@ SRT: índice secuencial, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, texto con prefijo
 - **Capabilities:** App Sandbox **eliminado** del target (sin entitlement
   `com.apple.security.app-sandbox`). Hardened Runtime opcional desactivado
   (app personal sin notarizar) — si se activa en el futuro, no bloquea
-  `Process` ni el micrófono con el usage description presente.
+  `Process` ni el micrófono con el usage description presente, **pero**
+  dyld ignoraría el `DYLD_LIBRARY_PATH` del shim de ffmpeg (§4.10) y volvería
+  el aviso de dylibs duplicadas.
 - **Info.plist:** `NSMicrophoneUsageDescription` = "The Transcriptor usa el
   micrófono para grabar audio que se transcribe íntegramente en este Mac;
   nada se envía a internet."
@@ -465,6 +499,7 @@ SRT: índice secuencial, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, texto con prefijo
 |---|---|
 | CLI real del script distinto al contrato §3.1 | Fase 1 valida/adapta el script antes de escribir Swift |
 | PATH vacío en apps GUI → no encuentra ffmpeg/python | PATH ampliado explícito + detección vía `zsh -lc` (§4.4) |
+| Dylibs de ffmpeg duplicadas (PyAV vs Homebrew vía torchcodec) → aviso ObjC / cuelgues | Shim de sonames + `DYLD_LIBRARY_PATH` (`FFmpegDylibShimService`, §4.10) |
 | pyannote requiere aceptar condiciones del modelo en HF | RequirementsView enlaza a las páginas del modelo; error de descarga se detecta y explica |
 | Buffers de Pipe llenos si no se lee stdout/stderr → deadlock del hijo | Lectura asíncrona continua de ambos pipes desde el arranque del proceso |
 | Grabaciones muy largas (RAM/disco) | Escritura incremental a disco; sin límite artificial, aviso de espacio <2 GB |

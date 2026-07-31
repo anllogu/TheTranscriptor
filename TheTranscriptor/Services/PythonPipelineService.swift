@@ -263,6 +263,14 @@ final class PythonPipelineService {
         if let hfToken = settings.hfToken, !hfToken.isEmpty {
             environment["HF_TOKEN"] = hfToken
         }
+        if let shim = FFmpegDylibShimService.shared.shimDirectory(forPython: settings.pythonPath) {
+            let existing = environment["DYLD_LIBRARY_PATH"]
+            if let existing, !existing.isEmpty {
+                environment["DYLD_LIBRARY_PATH"] = "\(shim.path):\(existing)"
+            } else {
+                environment["DYLD_LIBRARY_PATH"] = shim.path
+            }
+        }
         process.environment = environment
 
         let stdoutPipe = Pipe()

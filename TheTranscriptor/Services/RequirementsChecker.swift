@@ -86,6 +86,17 @@ class RequirementsChecker {
         process.executableURL = URL(fileURLWithPath: pythonPath)
         process.arguments = ["-c", "import faster_whisper, pyannote.audio"]
 
+        if let shim = FFmpegDylibShimService.shared.shimDirectory(forPython: pythonPath) {
+            var env = ProcessInfo.processInfo.environment
+            let existing = env["DYLD_LIBRARY_PATH"]
+            if let existing, !existing.isEmpty {
+                env["DYLD_LIBRARY_PATH"] = "\(shim.path):\(existing)"
+            } else {
+                env["DYLD_LIBRARY_PATH"] = shim.path
+            }
+            process.environment = env
+        }
+
         let errorPipe = Pipe()
         process.standardOutput = Pipe()
         process.standardError = errorPipe
