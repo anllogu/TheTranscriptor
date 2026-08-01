@@ -35,8 +35,14 @@ Run a single test:
 xcodebuild -scheme TheTranscriptor test -only-testing:TheTranscriptorTests/SomeTestClass/testMethodName
 ```
 
-`./run.sh` regenerates the project (if `xcodegen` is available), builds, and opens the
-resulting `.app`.
+`./run.sh` regenerates the project (if `xcodegen` is available), builds Debug, and opens
+the resulting `.app` from DerivedData.
+
+`./install.sh` builds **Release** and installs the bundle into `/Applications`
+(`--no-open`, `--dest <dir>` supported): it quits any running instance first and copies
+with `ditto` to preserve the signature. The identity is "Sign to Run Locally" (ad-hoc),
+fine for personal use but not for distribution — notarization would require Hardened
+Runtime, which breaks the ffmpeg dylib shim.
 
 `sources: - path: TheTranscriptor` in `project.yml` picks up any file dropped into that
 tree automatically (including non-`.swift` files as bundle resources) — but only files

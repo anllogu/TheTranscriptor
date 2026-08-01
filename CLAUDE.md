@@ -36,6 +36,15 @@ xcodebuild -scheme TheTranscriptor build
 xcodebuild -scheme TheTranscriptor test
 ```
 
+Two convenience scripts live at the repo root: `./run.sh` regenerates the
+project (if `xcodegen` is available), builds Debug and opens the resulting
+`.app` from DerivedData; `./install.sh` builds **Release** and installs the
+bundle into `/Applications` (`--no-open`, `--dest <dir>` supported), quitting
+any running instance first and copying with `ditto` to preserve the signature.
+The signing identity is "Sign to Run Locally" (ad-hoc) — fine for personal use,
+not for distribution: notarization would require Hardened Runtime, which breaks
+the ffmpeg dylib shim (see Gotchas).
+
 `sources: - path: TheTranscriptor` in `project.yml` picks up any file dropped
 into that tree automatically (including non-`.swift` files as bundle
 resources) — but only files that live **under `TheTranscriptor/`**. A file
