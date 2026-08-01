@@ -163,9 +163,11 @@ sistema.
 **Requiere macOS 14.4+** (Core Audio process taps).
 
 ### CU-10 · Grabación rápida desde el icono de la bandeja
-1. La app vive en la **barra de menús** (icono de forma de onda) y **no
-   aparece en el Dock** salvo cuando hay una ventana abierta. Esto permite
-   lanzar grabaciones sin tener que abrir la ventana.
+1. La app arranca mostrando su **ventana principal** y con **icono en el
+   Dock**, como cualquier app normal. Además vive en la **barra de menús**
+   (icono de forma de onda): al cerrar todas las ventanas, el icono del Dock
+   desaparece y la app sigue viva solo en la bandeja, lo que permite lanzar
+   grabaciones sin tener que abrir la ventana.
 2. Al pulsar el icono se despliega un menú cuyo contenido depende del estado:
    - **Listo:** "Grabar con micrófono", "Grabar reunión (micro + sistema)",
      "Transcribir archivo…" (selector de archivos), "Historial…", "Ajustes…",

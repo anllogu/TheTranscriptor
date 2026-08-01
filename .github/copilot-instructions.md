@@ -247,10 +247,11 @@ Swift side:
   `SystemAudioRecorderService.start()` throws on hard failures and `RecordingView` surfaces
   a "abrir Ajustes del Sistema" screen; silent-capture (missing permission) is diagnosable
   via the ⌘L debug log (source `sysaudio`: "IOProc del tap activo" but level stays 0.00).
-- **Menu bar / app solo de bandeja (CU-10, §4.8):** the app runs as a menu bar app —
-  `LSUIElement=true` in `project.yml` starts it **with no Dock icon**. An `AppDelegate`
-  (`@NSApplicationDelegateAdaptor`) toggles the activation policy between `.accessory` (no
-  Dock) and `.regular` (Dock + focus) based on whether a content window is visible (observes
+- **Menu bar / app solo de bandeja (CU-10, §4.8):** the app runs as a menu bar app that also
+  behaves like a normal app — it starts with activation policy `.regular` (Dock icon + main
+  window visible), no special `project.yml` setting required. An `AppDelegate`
+  (`@NSApplicationDelegateAdaptor`) toggles the activation policy between `.regular` (Dock +
+  focus) and `.accessory` (no Dock) based on whether a content window is visible (observes
   `NSWindow` key/main/willClose; excludes the closing window, still in `NSApp.windows`). The
   main scene is a `Window(id: "main")` (not `WindowGroup`) so `openWindow(id:)` reuses one
   window. `MenuBarExtra` uses `.menu` style so its content is a rebuilt snapshot on open (the

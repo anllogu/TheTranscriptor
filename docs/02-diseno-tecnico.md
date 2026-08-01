@@ -364,11 +364,12 @@ script (§3.4).
 
 Grabación rápida desde la barra de menús (CU-10) sin abrir la ventana.
 
-- **App solo de bandeja:** `LSUIElement=true` en el Info.plist (declarado en
-  `project.yml`) arranca la app **sin icono en el Dock** ni barra de menús de
-  aplicación. Un `AppDelegate` (`@NSApplicationDelegateAdaptor`) alterna la
-  *activation policy* entre `.accessory` (sin Dock) y `.regular` (con Dock y
-  foco) según haya o no una ventana de contenido visible: observa
+- **Bandeja al cerrar la ventana:** la app arranca como una app normal —
+  activation policy `.regular` por defecto (icono en el Dock, ventana
+  principal visible), sin ninguna configuración especial en el Info.plist. Un
+  `AppDelegate` (`@NSApplicationDelegateAdaptor`) alterna la *activation
+  policy* entre `.regular` (con Dock y foco) y `.accessory` (sin Dock) según
+  haya o no una ventana de contenido visible: observa
   `NSWindow.didBecomeKey/didBecomeMain/willClose` y recuenta las ventanas que
   pueden ser main (excluye la que se está cerrando, que aún figura en
   `NSApp.windows`). Al abrir una ventana desde la bandeja se llama a

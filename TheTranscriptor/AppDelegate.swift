@@ -1,18 +1,15 @@
 import AppKit
 
-/// App solo de bandeja (CU-10 / §4.8): al lanzar dejamos la app en
-/// `.accessory` para que **no** aparezca en el Dock ni tenga barra de menús de
-/// aplicación; solo vive en la barra de estado (el `MenuBarExtra`). Cuando se
-/// abre una ventana de contenido (principal, historial, registro o ajustes) se
-/// pasa a `.regular` para que tenga icono en el Dock y pueda recibir foco, y se
-/// vuelve a `.accessory` al cerrarse todas.
-///
-/// `LSUIElement=true` en el Info.plist arranca ya sin Dock; este delegate
-/// gestiona el vaivén posterior según haya o no ventanas visibles.
+/// Bandeja al cerrar la ventana (CU-10 / §4.8): la app arranca como una app
+/// normal, con la ventana principal visible y el icono en el Dock
+/// (activation policy `.regular`, la que trae el sistema por defecto). Este
+/// delegate solo gestiona el vaivén posterior: cuando se cierran todas las
+/// ventanas de contenido (principal, historial, registro o ajustes) pasa a
+/// `.accessory` para que la app siga viva únicamente en la barra de estado
+/// (el `MenuBarExtra`), sin Dock; en cuanto vuelve a haber una ventana visible
+/// se recupera `.regular`.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
-
         let center = NotificationCenter.default
         center.addObserver(
             self,
