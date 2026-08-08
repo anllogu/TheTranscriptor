@@ -415,20 +415,47 @@ Descubre e importa notas de la app **Notas de voz** de macOS (CU-11).
   sistema `import SQLite3` (sin dependencias) y se lee la tabla
   `ZCLOUDRECORDING` (`ZUNIQUEID`, `ZCUSTOMLABEL` = título, `ZDATE` = timestamp
   Core Data en segundos desde 2001-01-01 → `Date(timeIntervalSinceReferenceDate:)`,
-  `ZDURATION`, `ZPATH`). El formato interno de Apple puede cambiar entre
-  versiones, así que si el `prepare` falla o la BD no existe se **cae a listar
-  los `.m4a`** de la carpeta con su fecha de creación (red de seguridad).
-- **`loadLibrary() -> Library`** devuelve `.ok([VoiceMemo])`, `.empty`
-  (contenedor presente pero sin notas), `.unavailable` (contenedor inexistente
-  / Notas de voz nunca abierta en este Mac) o `.accessDenied` (contenedor con
-  contenido pero bloqueado por TCC). La ventana pinta un mensaje según el caso.
+  `ZDURATION`, `ZPATH`), tolerante al esquema vía `PRAGMA table_info(ZCLOUDRECORDING)`:
+  solo se piden las columnas que existen de verdad en esta versión de macOS, así
+  que la ausencia de una (p. ej. `ZDURATION`) no tira la tabla entera, solo esa
+  columna. El formato interno de Apple puede cambiar entre versiones, así que si
+  la tabla no existe se cae a listar los `.m4a` de la carpeta (red de
+  seguridad última) — pero `loadLibrary()` ya no depende de ese fallback como
+  todo-o-nada, ver el punto siguiente.
+- **`loadLibrary() -> Library`** siempre enumera la carpeta (fuente de verdad
+  de qué ficheros existen, `url`/`downloadState`) *y* siempre intenta leer la
+  BD; cada fila de la BD **enriquece** la entrada de carpeta que le
+  corresponde (`title`/`date`/`duration`/`id`) en vez de sustituir el listado
+  entero. El emparejamiento se hace por nombre de fichero sin extensión,
+  normalizado, probando varias claves candidatas en orden de fiabilidad: ruta
+  resuelta de `ZPATH` → nombre de fichero crudo del propio texto de `ZPATH`
+  (aunque esté obsoleto o no exista) → `ZUNIQUEID` → `ZCUSTOMLABEL`. Así un
+  `ZPATH` nulo o desactualizado ya no pierde ni duplica la nota. El resultado
+  final es `.ok([VoiceMemo])`, `.empty` (contenedor presente pero sin notas),
+  `.unavailable` (contenedor inexistente / Notas de voz nunca abierta en este
+  Mac) o `.accessDenied` (contenedor con contenido pero bloqueado por TCC),
+  decidido sobre el resultado de la enumeración de carpeta. La ventana pinta un
+  mensaje según el caso.
+- **Diagnóstico:** cada llamada a `loadLibrary()` que encuentra
+  `CloudRecordings.db` escribe una línea en `LogStore.shared` (source
+  `"voicememos"`, ⌘L) con filas leídas/emparejadas, o el punto de fallo si no
+  se pudo leer ninguna fila (p. ej. "tabla ausente").
 - **Permisos (TCC):** macOS protege el contenedor de Notas de voz; aunque el
   sandbox esté desactivado, leerlo requiere **Acceso a disco completo**. Sin él,
   `contentsOfDirectory`/abrir la BD devuelven `NSFileReadNoPermissionError`
   (EPERM/EACCES) → se detecta y se devuelve `.accessDenied`, y la ventana ofrece
   un botón que abre `x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles`.
-  El permiso de FDA exige **reiniciar la app**. La BD se abre con URI
-  `?immutable=1` (instantánea de solo lectura, sin tocar `-wal`/`-shm`).
+  El permiso de FDA exige **reiniciar la app**.
+- **Lectura por copia (WAL):** `CloudRecordings.db` + sus `-wal`/`-shm` (si
+  existen, best-effort) se copian a un directorio temporal propio y se abre
+  **esa copia** en solo lectura, sin `?immutable=1`, para que SQLite reproduzca
+  el WAL contra ella. Con `?immutable=1` sobre el original (mecanismo previo),
+  SQLite ignora por completo el `-wal`: si Notas de voz no ha hecho checkpoint
+  todavía (frecuente, y el motivo por el que la app mostraba títulos y fechas
+  falsos), la consulta veía una instantánea vieja o vacía y `loadLibrary`
+  degradaba en silencio al listado por carpeta — la trampa que nos mordió. La
+  copia se borra con `defer` al terminar; nunca se toca el original (solo
+  lecturas + copia, la razón original de `?immutable=1`, que sigue cumplida).
 - **iCloud y copia:** `copyForTranscription(_:)` materializa la nota y la copia
   a `NSTemporaryDirectory()/VoiceMemosImport/<uuid>/<título>.m4a`; se transcribe
   **la copia**, nunca el original (la pipeline borra su `--input` si

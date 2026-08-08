@@ -6,9 +6,14 @@ import SQLite3
 /// La biblioteca local vive en el contenedor de grupo
 /// `~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/`:
 /// los `.m4a` con nombres crípticos y una base SQLite `CloudRecordings.db` con
-/// los metadatos legibles (título, fecha, duración). Se lee la BD y, si falla o
-/// no existe, se cae a enumerar los `.m4a` de la carpeta (formato interno de
-/// Apple sujeto a cambios → el listado por carpeta es la red de seguridad).
+/// los metadatos legibles (título, fecha, duración). `loadLibrary()` siempre
+/// enumera la carpeta (fuente de verdad de qué ficheros existen) y siempre
+/// intenta leer la BD; las filas de la BD **enriquecen** las entradas de
+/// carpeta emparejándolas por nombre de fichero, en vez de sustituirlas
+/// todo-o-nada — así un fallo parcial de la BD (esquema distinto, fila con
+/// `ZPATH` obsoleto) degrada por fila y no borra los metadatos de toda la
+/// biblioteca (formato interno de Apple sujeto a cambios → el listado por
+/// carpeta sigue siendo la red de seguridad última).
 ///
 /// Con iCloud activo los ficheros pueden estar evacuados (placeholders de 0
 /// bytes); `ensureDownloaded(_:)` fuerza la descarga antes de transcribir, y
@@ -78,20 +83,61 @@ final class VoiceMemosService {
             return .unavailable
         }
 
-        let dbURL = dir.appendingPathComponent("CloudRecordings.db")
-        var memos: [VoiceMemo] = []
-        if fileManager.fileExists(atPath: dbURL.path),
-           let fromDB = readDatabase(at: dbURL, recordingsDir: dir) {
-            memos = fromDB
+        // La enumeración de carpeta es la fuente de verdad de qué ficheros
+        // existen de verdad (url/downloadState); siempre se ejecuta, sea cual
+        // sea el resultado de la BD.
+        var folderMemos: [VoiceMemo] = []
+        do {
+            folderMemos = try listRecordings(in: dir)
+        } catch {
+            if isPermissionError(error) { return .accessDenied }
         }
 
-        if memos.isEmpty {
-            do {
-                memos = try listRecordings(in: dir)
-            } catch {
-                if isPermissionError(error) { return .accessDenied }
+        var folderByKey: [String: VoiceMemo] = [:]
+        for memo in folderMemos {
+            folderByKey[Self.mergeKey(for: memo.url)] = memo
+        }
+
+        let dbURL = dir.appendingPathComponent("CloudRecordings.db")
+        if fileManager.fileExists(atPath: dbURL.path) {
+            let result = readDatabase(at: dbURL, recordingsDir: dir)
+            var matched = 0
+            for row in result.rows {
+                // Se prueban las claves candidatas en orden de fiabilidad:
+                // ruta resuelta > nombre de fichero crudo de ZPATH > uid >
+                // label. Un ZPATH nulo/obsoleto no debe perder la fila si
+                // alguna de las otras claves casa con un fichero real.
+                guard let key = row.mergeKeyCandidates.first(where: { folderByKey[$0] != nil }) else {
+                    continue
+                }
+                // Se conserva el `url`/`downloadState` real de la carpeta y se
+                // enriquece con título/fecha/duración/id de la fila de BD.
+                let folderEntry = folderByKey[key]!
+                folderByKey[key] = VoiceMemo(
+                    id: row.id,
+                    title: row.title,
+                    date: row.date,
+                    duration: row.duration,
+                    url: folderEntry.url,
+                    downloadState: folderEntry.downloadState
+                )
+                matched += 1
+            }
+            let walSuffix = result.walCopied ? " (wal copiado)" : ""
+            if let stage = result.failureStage {
+                LogStore.shared.append(
+                    "CloudRecordings.db: \(stage) → listado por carpeta",
+                    source: "voicememos"
+                )
+            } else {
+                LogStore.shared.append(
+                    "CloudRecordings.db: \(result.rowsSeen) filas, \(matched) emparejadas\(walSuffix)",
+                    source: "voicememos"
+                )
             }
         }
+
+        let memos = Array(folderByKey.values)
 
         if memos.isEmpty {
             // El contenedor tiene contenido protegido que no hemos podido leer
@@ -103,64 +149,189 @@ final class VoiceMemosService {
             return .empty
         }
 
-        memos.sort { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-        return .ok(memos)
+        return .ok(memos.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) })
+    }
+
+    /// Clave de emparejamiento BD ↔ carpeta: nombre de fichero sin extensión,
+    /// normalizado (minúsculas). Un `ZPATH` nulo u obsoleto en la BD no debe
+    /// eliminar la nota — el emparejamiento se hace por este nombre, no por
+    /// ruta absoluta.
+    private static func mergeKey(for url: URL) -> String {
+        url.deletingPathExtension().lastPathComponent.lowercased()
+    }
+
+    /// Igual que `mergeKey(for:)` pero partiendo de un nombre de fichero (o
+    /// cualquier texto de la BD que pueda serlo) en vez de una `URL`.
+    private static func mergeKey(forFileName name: String) -> String {
+        ((name as NSString).lastPathComponent as NSString)
+            .deletingPathExtension
+            .lowercased()
     }
 
     // MARK: - Lectura de CloudRecordings.db
 
-    private func readDatabase(at dbURL: URL, recordingsDir: URL) -> [VoiceMemo]? {
+    /// Fila leída de `ZCLOUDRECORDING` con metadatos y las claves candidatas
+    /// por las que se intentará emparejarla con un fichero de carpeta, en
+    /// orden de fiabilidad.
+    private struct DatabaseRow {
+        let id: String
+        let title: String
+        let date: Date?
+        let duration: Double?
+        let mergeKeyCandidates: [String]
+    }
+
+    /// Resultado de leer `CloudRecordings.db`, con diagnóstico para el
+    /// registro de depuración (⌘L): la lectura es ahora por fila, así que un
+    /// fallo parcial (columna ausente, `ZPATH` obsoleto) no tira toda la BD.
+    private struct DatabaseReadResult {
+        var rows: [DatabaseRow] = []
+        var rowsSeen: Int = 0
+        var walCopied: Bool = false
+        /// Descripción corta del punto de fallo si no se pudo leer ninguna
+        /// fila (p. ej. "no se pudo copiar el .db", "tabla ausente"). `nil`
+        /// si la lectura fue correcta (aunque devuelva cero filas).
+        var failureStage: String?
+    }
+
+    private func readDatabase(at dbURL: URL, recordingsDir: URL) -> DatabaseReadResult {
+        // Copiamos la BD (y, si existen, sus `-wal`/`-shm`) a un directorio
+        // temporal propio y abrimos ESA copia sin `immutable=1`, para que
+        // SQLite reproduzca el WAL. Con `immutable=1` sobre el original,
+        // SQLite ignora por completo el `-wal`: si Notas de voz no ha hecho
+        // checkpoint todavía (frecuente), la consulta ve una instantánea
+        // vieja o vacía — la trampa que nos mordió. Nunca se toca el
+        // original: solo lecturas + copia, borrada al terminar.
+        let snapshotDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("VoiceMemosDBSnapshot", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: snapshotDir, withIntermediateDirectories: true)
+        } catch {
+            return DatabaseReadResult(failureStage: "no se pudo crear directorio temporal")
+        }
+        defer { try? fileManager.removeItem(at: snapshotDir) }
+
+        let snapshotDB = snapshotDir.appendingPathComponent("CloudRecordings.db")
+        do {
+            try fileManager.copyItem(at: dbURL, to: snapshotDB)
+        } catch {
+            return DatabaseReadResult(failureStage: "no se pudo copiar el .db")
+        }
+
+        // `-wal`/`-shm` son best-effort: si no existen o no se pueden leer,
+        // seguimos solo con el `.db` (se comporta como si estuviera
+        // checkpointeado).
+        var walCopied = false
+        for suffix in ["-wal", "-shm"] {
+            let src = URL(fileURLWithPath: dbURL.path + suffix)
+            guard fileManager.fileExists(atPath: src.path) else { continue }
+            let dst = URL(fileURLWithPath: snapshotDB.path + suffix)
+            if (try? fileManager.copyItem(at: src, to: dst)) != nil, suffix == "-wal" {
+                walCopied = true
+            }
+        }
+
         var db: OpaquePointer?
-        // `immutable=1` abre la BD de otra app como una instantánea de solo
-        // lectura: evita tener que tocar sus ficheros `-wal`/`-shm` y el
-        // bloqueo, que suelen estar protegidos aparte.
-        let uri = dbURL.absoluteString + "?immutable=1"
+        let uri = snapshotDB.absoluteString + "?mode=ro"
         let flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_URI
         guard sqlite3_open_v2(uri, &db, flags, nil) == SQLITE_OK else {
             sqlite3_close(db)
-            return nil
+            return DatabaseReadResult(failureStage: "no se pudo abrir la copia")
         }
         defer { sqlite3_close(db) }
 
-        // ZCUSTOMLABEL es el título editable por el usuario y la columna más
-        // estable entre versiones de macOS; si el `prepare` falla (esquema
-        // distinto) devolvemos nil para que el llamante caiga al listado por
-        // carpeta.
-        let sql = "SELECT ZUNIQUEID, ZCUSTOMLABEL, ZDATE, ZDURATION, ZPATH FROM ZCLOUDRECORDING"
+        // Esquema tolerante: solo pedimos las columnas que de verdad existen
+        // en esta versión de macOS, para que la ausencia de una (p. ej.
+        // `ZDURATION`) no tire la tabla entera.
+        let availableColumns = tableColumns(db, table: "ZCLOUDRECORDING")
+        guard !availableColumns.isEmpty else {
+            return DatabaseReadResult(failureStage: "tabla ausente")
+        }
+
+        let wanted = ["ZUNIQUEID", "ZCUSTOMLABEL", "ZDATE", "ZDURATION", "ZPATH"]
+        let columns = wanted.filter { availableColumns.contains($0) }
+        guard !columns.isEmpty else {
+            return DatabaseReadResult(failureStage: "sin columnas reconocidas")
+        }
+        var indexByColumn: [String: Int32] = [:]
+        for (i, name) in columns.enumerated() { indexByColumn[name] = Int32(i) }
+
+        let sql = "SELECT \(columns.joined(separator: ", ")) FROM ZCLOUDRECORDING"
         var stmt: OpaquePointer?
         guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
-            return nil
+            return DatabaseReadResult(failureStage: "prepare falló")
         }
         defer { sqlite3_finalize(stmt) }
 
-        var memos: [VoiceMemo] = []
+        var rows: [DatabaseRow] = []
+        var rowsSeen = 0
         while sqlite3_step(stmt) == SQLITE_ROW {
-            let uid = columnText(stmt, 0)
-            let label = columnText(stmt, 1)
-            let hasDate = sqlite3_column_type(stmt, 2) != SQLITE_NULL
-            let dateVal = sqlite3_column_double(stmt, 2)
-            let hasDur = sqlite3_column_type(stmt, 3) != SQLITE_NULL
-            let durVal = sqlite3_column_double(stmt, 3)
-            let path = columnText(stmt, 4)
+            rowsSeen += 1
+            let uid = indexByColumn["ZUNIQUEID"].flatMap { columnText(stmt, $0) }
+            let label = indexByColumn["ZCUSTOMLABEL"].flatMap { columnText(stmt, $0) }
+            let dateIdx = indexByColumn["ZDATE"]
+            let hasDate = dateIdx.map { sqlite3_column_type(stmt, $0) != SQLITE_NULL } ?? false
+            let dateVal = dateIdx.map { sqlite3_column_double(stmt, $0) } ?? 0
+            let durIdx = indexByColumn["ZDURATION"]
+            let hasDur = durIdx.map { sqlite3_column_type(stmt, $0) != SQLITE_NULL } ?? false
+            let durVal = durIdx.map { sqlite3_column_double(stmt, $0) } ?? 0
+            let path = indexByColumn["ZPATH"].flatMap { columnText(stmt, $0) }
 
-            guard let url = resolveURL(path: path, in: recordingsDir),
-                  fileExistsOrPlaceholder(url) else {
-                continue
+            // Claves candidatas para emparejar con la carpeta, en orden de
+            // fiabilidad: ruta resuelta (ZPATH válido) > nombre de fichero
+            // crudo del texto de ZPATH (aunque esté obsoleto/no exista) >
+            // ZUNIQUEID > ZCUSTOMLABEL. Un ZPATH nulo/obsoleto no pierde la
+            // fila si alguna de las demás casa con un fichero real.
+            var candidates: [String] = []
+            var fallbackDisplayName: String?
+            if let resolved = resolveURL(path: path, in: recordingsDir) {
+                candidates.append(Self.mergeKey(for: resolved))
+                fallbackDisplayName = resolved.deletingPathExtension().lastPathComponent
             }
-            let title = (label?.isEmpty == false)
-                ? label!
-                : url.deletingPathExtension().lastPathComponent
-            memos.append(VoiceMemo(
-                id: uid ?? url.lastPathComponent,
+            if let path, !path.isEmpty {
+                let rawName = ((path as NSString).lastPathComponent as NSString).deletingPathExtension
+                candidates.append(Self.mergeKey(forFileName: rawName))
+                if fallbackDisplayName == nil { fallbackDisplayName = rawName }
+            }
+            if let uid {
+                candidates.append(Self.mergeKey(forFileName: uid))
+                if fallbackDisplayName == nil { fallbackDisplayName = uid }
+            }
+            if let label, !label.isEmpty {
+                candidates.append(Self.mergeKey(forFileName: label))
+            }
+
+            let fallbackTitle = fallbackDisplayName ?? label ?? "nota_de_voz"
+            let title = (label?.isEmpty == false) ? label! : fallbackTitle
+            rows.append(DatabaseRow(
+                id: uid ?? fallbackTitle,
                 title: title,
                 // ZDATE es un timestamp Core Data: segundos desde 2001-01-01.
                 date: hasDate ? Date(timeIntervalSinceReferenceDate: dateVal) : nil,
                 duration: hasDur ? durVal : nil,
-                url: url,
-                downloadState: downloadState(for: url)
+                mergeKeyCandidates: candidates
             ))
         }
-        return memos
+        return DatabaseReadResult(rows: rows, rowsSeen: rowsSeen, walCopied: walCopied, failureStage: nil)
+    }
+
+    /// Nombres de columna reales de una tabla (`PRAGMA table_info`), vacío si
+    /// la tabla no existe.
+    private func tableColumns(_ db: OpaquePointer?, table: String) -> Set<String> {
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA table_info(\(table))", -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+        var names: Set<String> = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            // PRAGMA table_info: columna 1 = nombre.
+            if let cString = sqlite3_column_text(stmt, 1) {
+                names.insert(String(cString: cString))
+            }
+        }
+        return names
     }
 
     private func columnText(_ stmt: OpaquePointer?, _ index: Int32) -> String? {
@@ -179,7 +350,9 @@ final class VoiceMemosService {
         // ZPATH suele ser el nombre de fichero (o una ruta relativa); nos
         // quedamos con el último componente y lo colgamos de Recordings/.
         let name = (path as NSString).lastPathComponent
-        return recordingsDir.appendingPathComponent(name)
+        let candidate = recordingsDir.appendingPathComponent(name)
+        guard fileExistsOrPlaceholder(candidate) else { return nil }
+        return candidate
     }
 
     // MARK: - Fallback: listar la carpeta
@@ -197,16 +370,61 @@ final class VoiceMemosService {
             if byPath[path] != nil { continue }
             let creation = (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate
                 ?? (try? entry.resourceValues(forKeys: [.creationDateKey]))?.creationDate
+            let nameWithoutExtension = url.deletingPathExtension().lastPathComponent
             byPath[path] = VoiceMemo(
                 id: url.lastPathComponent,
-                title: url.deletingPathExtension().lastPathComponent,
-                date: creation,
+                title: nameWithoutExtension,
+                date: dateFromRecordingFileName(nameWithoutExtension) ?? creation,
                 duration: nil,
                 url: url,
                 downloadState: downloadState(for: url)
             )
         }
         return Array(byPath.values)
+    }
+
+    /// Parsea el patrón de nombre de fichero de Notas de voz
+    /// `YYYYMMDD HHMMSS-XXXXXXXX` (sin extensión) a una fecha local. Devuelve
+    /// `nil` si el nombre no encaja exactamente con el patrón. Usado en el
+    /// fallback por carpeta: no sustituye al título/fecha reales de la BD,
+    /// pero evita que todas las notas aparezcan con la misma fecha cuando
+    /// iCloud las materializa de golpe.
+    func dateFromRecordingFileName(_ name: String) -> Date? {
+        let parts = name.split(separator: "-", maxSplits: 1)
+        guard let datePart = parts.first else { return nil }
+        let dateTime = datePart.split(separator: " ")
+        guard dateTime.count == 2,
+              dateTime[0].count == 8, dateTime[0].allSatisfy(\.isNumber),
+              dateTime[1].count == 6, dateTime[1].allSatisfy(\.isNumber) else {
+            return nil
+        }
+
+        var components = DateComponents()
+        let datePartStr = String(dateTime[0])
+        let timePartStr = String(dateTime[1])
+        components.year = Int(datePartStr.prefix(4))
+        components.month = Int(datePartStr.dropFirst(4).prefix(2))
+        components.day = Int(datePartStr.dropFirst(6).prefix(2))
+        components.hour = Int(timePartStr.prefix(2))
+        components.minute = Int(timePartStr.dropFirst(2).prefix(2))
+        components.second = Int(timePartStr.dropFirst(4).prefix(2))
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        guard let date = calendar.date(from: components) else { return nil }
+        // `Calendar.date(from:)` normaliza componentes fuera de rango (p. ej.
+        // mes 13) en vez de fallar; recomponemos y comparamos para detectar
+        // ese caso y devolver `nil` como un patrón realmente no conforme.
+        let recomposed = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        guard recomposed.year == components.year,
+              recomposed.month == components.month,
+              recomposed.day == components.day,
+              recomposed.hour == components.hour,
+              recomposed.minute == components.minute,
+              recomposed.second == components.second else {
+            return nil
+        }
+        return date
     }
 
     /// Traduce una entrada de carpeta a la URL "real" del `.m4a`. Acepta tanto

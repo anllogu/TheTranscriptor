@@ -124,18 +124,28 @@ Swift side:
   ⌘N/⌘,/⌘C/⌘L/⌘Y/⌘I.
 - **Importar de Notas de voz (CU-11, §4.9):** `VoiceMemosService` lee la biblioteca de la
   app Notas de voz de macOS en `~/Library/Group Containers/group.com.apple.VoiceMemos.shared/Recordings/`
-  (`.m4a` + `CloudRecordings.db` SQLite, leído vía `import SQLite3` sin dependencias; fallback a
-  listar `.m4a` si el esquema cambia). Con sandbox desactivado no hacen falta entitlements.
-  Trampas: (1) **nunca** se transcribe el original — `copyForTranscription` copia a un temporal,
-  porque la pipeline borra su `--input` si "Borrar audio" está activo y eso jamás debe tocar la
-  biblioteca del usuario; (2) **no** llames a `startDownloadingUbiquitousItem` sobre un fichero
-  ya materializado del contenedor de otra app: lanza un error engañoso ("couldn't be saved in the
-  folder Recordings") aunque exista y sea legible — nos mordió. El camino rápido copia directo si
-  es legible; solo para notas evacuadas a iCloud se usa `NSFileCoordinator` (lectura coordinada)
-  que dispara la descarga del sistema sin que la app escriba en la biblioteca.
-  `AppState.transcribeVoiceMemo` corre la copia en `Task.detached` (bloquea si descarga) →
-  `runPipeline(input:displayName:)` (título de la nota como origen del historial,
-  `sourceAudioPath=nil`). Ventana `Window(id: "voice-memos")` (⌘I) con
+  (`.m4a` + `CloudRecordings.db` SQLite, leído vía `import SQLite3` sin dependencias).
+  `loadLibrary()` **siempre** enumera la carpeta *y* siempre intenta la BD, y une las dos por
+  nombre de fichero (varias claves candidatas en orden: ruta resuelta → nombre crudo de `ZPATH` →
+  `ZUNIQUEID` → `ZCUSTOMLABEL`) en vez de un fallback todo-o-nada: la BD *enriquece*
+  título/fecha/duración sobre las entradas de carpeta, así que un fallo parcial (esquema distinto,
+  `ZPATH` obsoleto) degrada por fila, no por biblioteca entera; solo si la tabla no existe se cae
+  al listado por carpeta puro. Con sandbox desactivado no hacen falta entitlements.
+  Trampas: (1) **la BD se lee copiando `CloudRecordings.db` + `-wal`/`-shm` a un temporal y
+  abriendo esa copia sin `?immutable=1`** — con `?immutable=1` sobre el original (mecanismo previo)
+  SQLite ignora el `-wal` por completo, así que si Notas de voz no había hecho checkpoint todavía
+  la consulta veía una instantánea vieja o vacía y `loadLibrary` degradaba en silencio a nombres de
+  fichero crípticos y la misma fecha para todas las notas — nos mordió. La copia se borra con
+  `defer`, nunca se toca el original; (2) **nunca** se transcribe el original —
+  `copyForTranscription` copia a un temporal, porque la pipeline borra su `--input` si "Borrar
+  audio" está activo y eso jamás debe tocar la biblioteca del usuario; (3) **no** llames a
+  `startDownloadingUbiquitousItem` sobre un fichero ya materializado del contenedor de otra app:
+  lanza un error engañoso ("couldn't be saved in the folder Recordings") aunque exista y sea
+  legible — nos mordió también. El camino rápido copia directo si es legible; solo para notas
+  evacuadas a iCloud se usa `NSFileCoordinator` (lectura coordinada) que dispara la descarga del
+  sistema sin que la app escriba en la biblioteca. `AppState.transcribeVoiceMemo` corre la copia en
+  `Task.detached` (bloquea si descarga) → `runPipeline(input:displayName:)` (título de la nota como
+  origen del historial, `sourceAudioPath=nil`). Ventana `Window(id: "voice-memos")` (⌘I) con
   `VoiceMemosWindowState.shared.isWindowOpen`, mismo patrón que log/historial.
 - **Notas de voz está protegido por TCC:** aunque el sandbox esté desactivado, macOS bloquea
   la lectura del contenedor de grupo de Notas de voz para cualquier app que no sea Notas de
